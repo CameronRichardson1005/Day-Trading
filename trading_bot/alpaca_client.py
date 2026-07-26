@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from typing import Any
 from .indicators import calculate_wilder_atr
 
-from .config import API_KEY, API_SECRET, BASE_URL, TICKERS
+from .config import API_KEY, API_SECRET, BASE_URL
 from .utils import call_with_retries
 
 
@@ -52,6 +52,25 @@ class AlpacaClient:
             raise RuntimeError(f"{label} failed: {message}")
 
         return data
+
+    @staticmethod
+    def _symbols_from_csv(
+            symbols_csv: str,
+    ) -> list[str]:
+        symbols = []
+
+        for raw_symbol in symbols_csv.split(","):
+            symbol = raw_symbol.strip().upper()
+
+            if symbol and symbol not in symbols:
+                symbols.append(symbol)
+
+        if not symbols:
+            raise ValueError(
+                "At least one symbol is required."
+            )
+
+        return symbols
 
     @staticmethod
     def _is_valid_bar(bar: Any) -> bool:
@@ -138,7 +157,7 @@ class AlpacaClient:
                 symbol=symbol,
                 label="1-minute",
             )
-            for symbol in TICKERS
+            for symbol in self._symbols_from_csv(symbols_csv)
         }
 
     def get_opening_15min_bars(
@@ -195,7 +214,7 @@ class AlpacaClient:
                 symbol=symbol,
                 label="opening 15-minute",
             )
-            for symbol in TICKERS
+            for symbol in self._symbols_from_csv(symbols_csv)
         }
 
     def get_previous_day_ranges_all(
@@ -234,7 +253,7 @@ class AlpacaClient:
         bars_by_symbol = data.get("bars", {})
         results: dict[str, float | None] = {}
 
-        for symbol in TICKERS:
+        for symbol in self._symbols_from_csv(symbols_csv):
             raw_bars = bars_by_symbol.get(symbol, [])
 
             valid_bars = [
@@ -294,5 +313,5 @@ class AlpacaClient:
 
         return {
             symbol: (bars_by_symbol.get(symbol) or [None])[0]
-            for symbol in TICKERS
+            for symbol in self._symbols_from_csv(symbols_csv)
         }
