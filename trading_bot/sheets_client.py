@@ -52,7 +52,97 @@ class SheetsClient:
                 rows=rows,
                 cols=cols,
             )
+    @staticmethod
+    def _validate_header(
+        existing_values: list[list[str]],
+        expected_columns: list[str],
+        sheet_name: str,
+    ) -> None:
+        if existing_values and existing_values[0] != expected_columns:
+            raise RuntimeError(
+                f"{sheet_name} has unexpected columns. "
+                "The sheet was not modified."
+            )
 
+    @staticmethod
+    def _normalise_row(
+        row: list,
+        column_count: int,
+    ) -> list:
+        normalised = list(row[:column_count])
+
+        if len(normalised) < column_count:
+            normalised.extend(
+                [""] * (column_count - len(normalised))
+            )
+
+        return normalised
+
+    def _rewrite_table(
+        self,
+        worksheet,
+        columns: list[str],
+        rows: list[list],
+        last_column: str,
+    ) -> None:
+        existing_row_count = len(worksheet.get_all_values())
+        table = [columns, *rows]
+
+        worksheet.update(
+            values=table,
+            range_name=(
+                f"A1:{last_column}{len(table)}"
+            ),
+            value_input_option="USER_ENTERED",
+        )
+
+        if existing_row_count > len(table):
+            worksheet.batch_clear(
+                [
+                    (
+                        f"A{len(table) + 1}:"
+                        f"{last_column}{existing_row_count}"
+                    )
+                ]
+            )
+
+    def _replace_date_rows(
+        self,
+        worksheet,
+        columns: list[str],
+        date_str: str,
+        replacement_rows: list[list],
+        last_column: str,
+        sheet_name: str,
+    ) -> None:
+        existing_values = worksheet.get_all_values()
+
+        self._validate_header(
+            existing_values=existing_values,
+            expected_columns=columns,
+            sheet_name=sheet_name,
+        )
+
+        preserved_rows = []
+
+        for row in existing_values[1:]:
+            normalised = self._normalise_row(
+                row=row,
+                column_count=len(columns),
+            )
+
+            if normalised[0] != date_str:
+                preserved_rows.append(normalised)
+
+        self._rewrite_table(
+            worksheet=worksheet,
+            columns=columns,
+            rows=[
+                *preserved_rows,
+                *replacement_rows,
+            ],
+            last_column=last_column,
+        )
     def test_connection(self) -> list[str]:
         worksheets = self.spreadsheet.worksheets()
 
@@ -196,22 +286,11 @@ class SheetsClient:
             cols=len(invest_columns),
         )
 
-        existing_values = worksheet.get_all_values()
-
-        if (
-                not existing_values
-                or existing_values[0] != invest_columns
-        ):
-            worksheet.update(
-                values=[invest_columns],
-                range_name="A1:Q1",
-            )
-
-        rows_to_append = []
+        strategy_rows = []
 
         for stock in stocks.values():
             if stock.opening_bar is None or stock.atr is None:
-                rows_to_append.append(
+                strategy_rows.append(
                     [
                         date_str,
                         stock.symbol,
@@ -224,7 +303,7 @@ class SheetsClient:
                         "",
                         "",
                         "",
-                        "",
+                        "NO INVEST",
                         "",
                         "",
                         "",
@@ -236,7 +315,7 @@ class SheetsClient:
 
             opening_bar = stock.opening_bar
 
-            rows_to_append.append(
+            strategy_rows.append(
                 [
                     date_str,
                     stock.symbol,
@@ -258,11 +337,19 @@ class SheetsClient:
                 ]
             )
 
-        if rows_to_append:
-            worksheet.append_rows(
-                rows_to_append,
-                value_input_option="USER_ENTERED",
-            )
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=invest_columns,
+            date_str=date_str,
+            replacement_rows=strategy_rows,
+            last_column="Q",
+            sheet_name="Invest",
+        )
+
+        print(
+            f"{len(strategy_rows)} strategy row(s) reconciled "
+            "in the Invest sheet."
+        )
 
     def write_orders(
             self,
@@ -283,17 +370,6 @@ class SheetsClient:
             cols=len(order_columns),
         )
 
-        existing_values = worksheet.get_all_values()
-
-        if (
-                not existing_values
-                or existing_values[0] != order_columns
-        ):
-            worksheet.update(
-                values=[order_columns],
-                range_name="A1:E1",
-            )
-
         order_rows = []
 
         for stock in stocks.values():
@@ -310,15 +386,22 @@ class SheetsClient:
                 ]
             )
 
-        if order_rows:
-            worksheet.append_rows(
-                order_rows,
-                value_input_option="USER_ENTERED",
-            )
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=order_columns,
+            date_str=date_str,
+            replacement_rows=order_rows,
+            last_column="E",
+            sheet_name="Orders",
+        )
 
+        if order_rows:
             print(
-                f"{len(order_rows)} order(s) written "
-                "to the Orders sheet."
+                f"{len(order_rows)} order(s) reconciled "
+                "in the Orders sheet."
             )
         else:
-            print("No INVEST orders generated.")
+            print(
+                "No INVEST orders generated. "
+                "Existing orders for this date were removed."
+            )

@@ -39,55 +39,41 @@ class MinuteTracker:
 
     def prepare_sheet(self, date_str: str) -> None:
         """
-        Ensure the tracking worksheet has the correct headers and
-        one row for every tracked stock for the current date.
+        Guarantee exactly one tracking row per date and symbol.
+        Existing duplicate keys are consolidated using their latest row.
         """
         existing_values = self.worksheet.get_all_values()
 
         if (
-            not existing_values
-            or existing_values[0] != self.TRACKING_COLUMNS
+                existing_values
+                and existing_values[0] != self.TRACKING_COLUMNS
         ):
-            self.worksheet.update(
-                values=[self.TRACKING_COLUMNS],
-                range_name="A1:F1",
+            raise RuntimeError(
+                "1 minute intervals has unexpected columns. "
+                "The sheet was not modified."
             )
 
-            existing_values = self.worksheet.get_all_values()
+        unique_rows: dict[tuple[str, str], list] = {}
 
-        self.symbol_rows = {}
-
-        for row_number, row in enumerate(
-            existing_values[1:],
-            start=2,
-        ):
-            if len(row) < 2:
+        for row in existing_values[1:]:
+            if len(row) < 2 or not row[0] or not row[1]:
                 continue
 
-            row_date = row[0]
-            symbol = row[1]
+            normalised = list(row[:6])
 
-            if row_date == date_str and symbol in self.stocks:
-                self.symbol_rows[symbol] = row_number
+            if len(normalised) < 6:
+                normalised.extend(
+                    [""] * (6 - len(normalised))
+                )
 
-        missing_symbols = [
-            symbol
-            for symbol in self.stocks
-            if symbol not in self.symbol_rows
-        ]
+            key = (normalised[0], normalised[1])
+            unique_rows[key] = normalised
 
-        if not missing_symbols:
-            return
+        for symbol in self.stocks:
+            key = (date_str, symbol)
 
-        first_new_row = len(existing_values) + 1
-        new_rows = []
-
-        for offset, symbol in enumerate(missing_symbols):
-            row_number = first_new_row + offset
-            self.symbol_rows[symbol] = row_number
-
-            new_rows.append(
-                [
+            if key not in unique_rows:
+                unique_rows[key] = [
                     date_str,
                     symbol,
                     "",
@@ -95,14 +81,24 @@ class MinuteTracker:
                     "",
                     "",
                 ]
-            )
 
-        last_new_row = first_new_row + len(new_rows) - 1
+        tracking_rows = list(unique_rows.values())
 
-        self.worksheet.update(
-            values=new_rows,
-            range_name=f"A{first_new_row}:F{last_new_row}",
+        self.sheets._rewrite_table(
+            worksheet=self.worksheet,
+            columns=self.TRACKING_COLUMNS,
+            rows=tracking_rows,
+            last_column="F",
         )
+
+        self.symbol_rows = {}
+
+        for row_number, row in enumerate(
+                tracking_rows,
+                start=2,
+        ):
+            if row[0] == date_str and row[1] in self.stocks:
+                self.symbol_rows[row[1]] = row_number
 
     def process_bar(
         self,
