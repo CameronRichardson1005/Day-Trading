@@ -405,3 +405,87 @@ class SheetsClient:
                 "No INVEST orders generated. "
                 "Existing orders for this date were removed."
             )
+
+    def write_scanner_dashboard(
+            self,
+            date_str: str,
+            statistics,
+            selected_symbols,
+            scanner,
+    ) -> None:
+        dashboard_columns = [
+            "Date",
+            "Symbol",
+            "Valid Bars",
+            "Average Volume",
+            "Average Price",
+            "Average Range",
+            "Average Range %",
+            "Ranking Score",
+            "Eligible",
+            "Selected",
+            "Decision",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Scanner Dashboard",
+            rows=100,
+            cols=len(dashboard_columns),
+        )
+
+        selected_set = set(selected_symbols)
+        dashboard_rows = []
+
+        ranked_statistics = sorted(
+            statistics,
+            key=lambda stats: (
+                -stats.ranking_score,
+                stats.symbol,
+            ),
+        )
+
+        for stats in ranked_statistics:
+            failures = scanner.eligibility_failures(
+                stats
+            )
+            eligible = not failures
+            selected = stats.symbol in selected_set
+
+            if selected:
+                decision = "SELECTED"
+            elif eligible:
+                decision = (
+                    "ELIGIBLE - LIMIT REACHED"
+                )
+            else:
+                decision = "; ".join(failures)
+
+            dashboard_rows.append(
+                [
+                    date_str,
+                    stats.symbol,
+                    stats.valid_bars,
+                    round(stats.avg_volume, 2),
+                    round(stats.avg_price, 4),
+                    round(stats.avg_range, 4),
+                    round(stats.avg_range_pct, 4),
+                    round(stats.ranking_score, 4),
+                    "YES" if eligible else "NO",
+                    "YES" if selected else "NO",
+                    decision,
+                ]
+            )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=dashboard_columns,
+            date_str=date_str,
+            replacement_rows=dashboard_rows,
+            last_column="K",
+            sheet_name="Scanner Dashboard",
+        )
+
+        print(
+            f"{len(dashboard_rows)} scanner row(s) "
+            "reconciled in the Scanner Dashboard sheet."
+        )

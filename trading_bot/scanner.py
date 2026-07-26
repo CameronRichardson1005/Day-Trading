@@ -42,21 +42,39 @@ class StockScanner:
         self.rules = rules or ScannerRules()
 
     def is_eligible(self, stats: StockStats) -> bool:
-        rules = self.rules
+        return not self.eligibility_failures(stats)
 
-        return (
-            stats.valid_bars
-            >= rules.minimum_valid_bars
-            and rules.minimum_price
-            <= stats.avg_price
-            <= rules.maximum_price
-            and stats.avg_volume
-            >= rules.minimum_average_volume
-            and stats.avg_range
-            >= rules.minimum_average_range
-            and stats.avg_range_pct
-            >= rules.minimum_average_range_pct
-        )
+    def eligibility_failures(
+            self,
+            stats: StockStats,
+    ) -> list[str]:
+        rules = self.rules
+        failures = []
+
+        if stats.valid_bars < rules.minimum_valid_bars:
+            failures.append("INSUFFICIENT BARS")
+
+        if stats.avg_price < rules.minimum_price:
+            failures.append("PRICE BELOW MINIMUM")
+        elif stats.avg_price > rules.maximum_price:
+            failures.append("PRICE ABOVE MAXIMUM")
+
+        if (
+            stats.avg_volume
+            < rules.minimum_average_volume
+        ):
+            failures.append("VOLUME BELOW MINIMUM")
+
+        if stats.avg_range < rules.minimum_average_range:
+            failures.append("RANGE BELOW MINIMUM")
+
+        if (
+            stats.avg_range_pct
+            < rules.minimum_average_range_pct
+        ):
+            failures.append("RANGE % BELOW MINIMUM")
+
+        return failures
 
     def select_candidates(
             self,
