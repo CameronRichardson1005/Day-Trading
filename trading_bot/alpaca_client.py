@@ -6,6 +6,7 @@ from typing import Any
 from .indicators import calculate_wilder_atr
 
 from .config import API_KEY, API_SECRET, BASE_URL
+from .scanner import StockStats
 from .utils import call_with_retries
 
 
@@ -280,6 +281,111 @@ class AlpacaClient:
                 results[symbol] = None
 
         return results
+
+    def get_scanner_statistics(
+            self,
+            symbols_csv: str,
+            date_str: str,
+            lookback_days: int = 30,
+    ) -> list[StockStats]:
+        if lookback_days < 1:
+            raise ValueError(
+                "lookback_days must be at least 1."
+            )
+
+        symbols = self._symbols_from_csv(symbols_csv)
+
+        end_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ) - timedelta(days=1)
+
+        start_date = end_date - timedelta(
+            days=lookback_days * 3
+        )
+
+        params = {
+            "symbols": ",".join(symbols),
+            "timeframe": "1Day",
+            "start": start_date.strftime(
+                "%Y-%m-%dT00:00:00Z"
+            ),
+            "end": end_date.strftime(
+                "%Y-%m-%dT23:59:59Z"
+            ),
+            "adjustment": "raw",
+            "feed": "iex",
+            "currency": "usd",
+            "limit": 10000,
+            "sort": "desc",
+        }
+
+        data = self._request(
+            params=params,
+            label="Scanner daily bars fetch",
+        )
+
+        bars_by_symbol = data.get("bars", {})
+        statistics = []
+
+        for symbol in symbols:
+            selected_bars = []
+
+            for bar in bars_by_symbol.get(symbol, []):
+                if not self._is_valid_bar(bar):
+                    continue
+
+                try:
+                    volume = float(bar["v"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+                if volume < 0:
+                    continue
+
+                selected_bars.append((bar, volume))
+
+                if len(selected_bars) == lookback_days:
+                    break
+
+            if not selected_bars:
+                continue
+
+            bar_count = len(selected_bars)
+
+            avg_volume = sum(
+                volume
+                for _, volume in selected_bars
+            ) / bar_count
+
+            avg_price = sum(
+                float(bar["c"])
+                for bar, _ in selected_bars
+            ) / bar_count
+
+            avg_range = sum(
+                float(bar["h"]) - float(bar["l"])
+                for bar, _ in selected_bars
+            ) / bar_count
+
+            avg_range_pct = (
+                (avg_range / avg_price) * 100
+                if avg_price
+                else 0.0
+            )
+
+            statistics.append(
+                StockStats(
+                    symbol=symbol,
+                    valid_bars=bar_count,
+                    avg_volume=avg_volume,
+                    avg_price=avg_price,
+                    avg_range=avg_range,
+                    avg_range_pct=avg_range_pct,
+                )
+            )
+
+        return statistics
 
     def test_connection(
         self,
