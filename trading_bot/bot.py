@@ -26,6 +26,7 @@ class TradingBot:
         self.scanner = StockScanner(
             current_symbols=TICKERS,
         )
+        self.scanner_statistics = None
 
         self.sheets = None
         self.tracker = None
@@ -34,6 +35,8 @@ class TradingBot:
             self,
             date_str: str,
     ) -> list[str]:
+        self.scanner_statistics = None
+
         fallback_symbols = list(
             self.scanner.current_symbols
         )
@@ -53,6 +56,7 @@ class TradingBot:
                     statistics
                 )
             )
+            self.scanner_statistics = statistics
 
         except Exception as error:
             print(
@@ -196,8 +200,30 @@ class TradingBot:
 
         date_str = today_eastern.strftime("%Y-%m-%d")
 
-        self.refresh_symbols_for_date(date_str)
+        selected_symbols = (
+            self.refresh_symbols_for_date(date_str)
+        )
         self.initialise_sheets()
+
+        if self.scanner_statistics is not None:
+            try:
+                self.sheets.write_scanner_dashboard(
+                    date_str=date_str,
+                    statistics=self.scanner_statistics,
+                    selected_symbols=selected_symbols,
+                    scanner=self.scanner,
+                )
+            except Exception as error:
+                print(
+                    "Scanner dashboard update failed. "
+                    "Live tracking will continue."
+                )
+                print(f"Dashboard error: {error}")
+        else:
+            print(
+                "Scanner dashboard skipped because "
+                "scanner statistics were unavailable."
+            )
 
         print()
         print("Starting real-time 1-minute tracker...")
