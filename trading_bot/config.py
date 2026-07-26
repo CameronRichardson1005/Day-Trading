@@ -31,6 +31,15 @@ TICKERS = [
     "PLTR",
 ]
 
+CANDIDATE_TICKERS = [
+    "SNAP",
+    "UBER",
+    "PINS",
+    "RGTI",
+    "SOXL",
+    "LYFT",
+]
+
 ATR_MULTIPLIER = 0.25
 STOP_BUFFER = 0.05
 

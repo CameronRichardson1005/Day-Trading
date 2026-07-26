@@ -4,8 +4,9 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from .alpaca_client import AlpacaClient
-from .config import TICKERS
+from .config import CANDIDATE_TICKERS, TICKERS
 from .models import Stock
+from .scanner import StockScanner
 from .sheets_client import SheetsClient
 from .strategy import ManipulationStrategy
 from .tracker import MinuteTracker
@@ -22,9 +23,68 @@ class TradingBot:
 
         self.alpaca = AlpacaClient()
         self.strategy = ManipulationStrategy()
+        self.scanner = StockScanner(
+            current_symbols=TICKERS,
+        )
 
         self.sheets = None
         self.tracker = None
+
+    def refresh_symbols_for_date(
+            self,
+            date_str: str,
+    ) -> list[str]:
+        fallback_symbols = list(
+            self.scanner.current_symbols
+        )
+
+        try:
+            statistics = (
+                self.alpaca.get_scanner_statistics(
+                    symbols_csv=",".join(
+                        CANDIDATE_TICKERS
+                    ),
+                    date_str=date_str,
+                )
+            )
+
+            selected_symbols = (
+                self.scanner.select_symbols(
+                    statistics
+                )
+            )
+
+        except Exception as error:
+            print(
+                "Stock scanner failed. "
+                "Using existing tickers."
+            )
+            print(f"Scanner error: {error}")
+
+            selected_symbols = fallback_symbols
+
+        existing_stocks = self.stocks
+
+        self.stocks = {
+            symbol: existing_stocks.get(
+                symbol,
+                Stock(symbol=symbol),
+            )
+            for symbol in selected_symbols
+        }
+
+        self.symbols_csv = ",".join(selected_symbols)
+
+        # Rebuild the tracker when Sheets are next
+        # initialised so it receives the new symbols.
+        self.tracker = None
+
+        print(
+            "Selected symbols:",
+            ", ".join(selected_symbols),
+        )
+
+        return selected_symbols
 
     def initialise_sheets(self) -> None:
         if self.sheets is None:
