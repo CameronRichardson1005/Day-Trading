@@ -31,12 +31,14 @@ def main() -> None:
         bot.run_strategy_and_write(
             date_str=date_str
         )
+    elif mode == "production":
+        bot.run_production()
 
     else:
         print(f"Unknown mode: {mode}")
         print(
             "Available modes: "
-            "test, live, strategy, write"
+            "test, live, strategy, write, production"
         )
 
 

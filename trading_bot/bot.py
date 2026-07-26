@@ -1,4 +1,6 @@
-from datetime import datetime, time
+import time as time_module
+
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from .alpaca_client import AlpacaClient
@@ -269,3 +271,92 @@ class TradingBot:
         )
 
         print("Strategy results written successfully.")
+
+    def run_production(self) -> None:
+        eastern = ZoneInfo("America/New_York")
+        now = datetime.now(eastern)
+
+        date_str = now.strftime("%Y-%m-%d")
+
+        if now.weekday() >= 5:
+            print()
+            print("The market is closed today.")
+            print("Production mode was not started.")
+            return
+
+        market_open = datetime.combine(
+            now.date(),
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        )
+
+        strategy_time = datetime.combine(
+            now.date(),
+            time(hour=9, minute=45),
+            tzinfo=eastern,
+        ) + timedelta(seconds=15)
+
+        print()
+        print("===================================")
+        print(" Production Trading Mode")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+
+        if now < market_open:
+            wait_seconds = (
+                    market_open - now
+            ).total_seconds()
+
+            print(
+                "Waiting for market open at "
+                "09:30 New York time..."
+            )
+
+            time_module.sleep(wait_seconds)
+
+        elif now >= strategy_time:
+            print()
+            print("The opening tracking window has ended.")
+            print("Skipping live tracking.")
+            print("Running the strategy immediately...")
+
+            self.run_strategy_and_write(
+                date_str=date_str
+            )
+
+            print()
+            print("Production workflow completed.")
+            return
+
+        else:
+            print()
+            print("The opening window has already started.")
+            print("Starting the tracker now...")
+
+        self.run_live_tracker()
+
+        now = datetime.now(eastern)
+
+        remaining_seconds = (
+                strategy_time - now
+        ).total_seconds()
+
+        if remaining_seconds > 0:
+            print()
+            print(
+                "Waiting for Alpaca to complete "
+                "the opening 15-minute candle..."
+            )
+
+            time_module.sleep(remaining_seconds)
+
+        print()
+        print("Opening tracking window completed.")
+        print("Calculating strategy signals...")
+
+        self.run_strategy_and_write(
+            date_str=date_str
+        )
+
+        print()
+        print("Production workflow completed.")
