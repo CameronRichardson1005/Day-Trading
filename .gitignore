@@ -18,3 +18,4 @@ venv/
 logs/
 
 .env.save
+.env.save
