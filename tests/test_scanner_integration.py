@@ -1,4 +1,7 @@
+from datetime import datetime as RealDateTime
 from types import SimpleNamespace
+
+import trading_bot.bot as bot_module
 
 from trading_bot.bot import TradingBot
 from trading_bot.config import CANDIDATE_TICKERS
@@ -104,3 +107,62 @@ def test_candidate_configuration_is_distinct():
     assert set(TICKERS).isdisjoint(
         CANDIDATE_TICKERS
     )
+
+
+def test_live_scanner_runs_before_tracker_initialisation(
+        monkeypatch,
+):
+    bot = object.__new__(TradingBot)
+    events = []
+
+    class FrozenDateTime(RealDateTime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(
+                2026,
+                7,
+                27,
+                8,
+                0,
+                tzinfo=tz,
+            )
+
+    class FakeTracker:
+        def track_window(
+                self,
+                date_str,
+                window_start,
+                window_end,
+        ):
+            events.append(
+                ("track", date_str)
+            )
+
+    def fake_refresh(date_str):
+        events.append(
+            ("refresh", date_str)
+        )
+        return ["CORE", "SNAP"]
+
+    def fake_initialise():
+        events.append(
+            ("initialise", None)
+        )
+        bot.tracker = FakeTracker()
+
+    monkeypatch.setattr(
+        bot_module,
+        "datetime",
+        FrozenDateTime,
+    )
+
+    bot.refresh_symbols_for_date = fake_refresh
+    bot.initialise_sheets = fake_initialise
+
+    bot.run_live_tracker()
+
+    assert events == [
+        ("refresh", "2026-07-27"),
+        ("initialise", None),
+        ("track", "2026-07-27"),
+    ]

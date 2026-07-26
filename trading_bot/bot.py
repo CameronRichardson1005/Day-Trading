@@ -169,8 +169,6 @@ class TradingBot:
         print("Bot Started Successfully")
 
     def run_live_tracker(self) -> None:
-        self.initialise_sheets()
-
         eastern = ZoneInfo("America/New_York")
         utc = ZoneInfo("UTC")
 
@@ -197,6 +195,9 @@ class TradingBot:
         ).replace(tzinfo=None)
 
         date_str = today_eastern.strftime("%Y-%m-%d")
+
+        self.refresh_symbols_for_date(date_str)
+        self.initialise_sheets()
 
         print()
         print("Starting real-time 1-minute tracker...")
