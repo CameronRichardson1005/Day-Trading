@@ -1,10 +1,14 @@
+import logging
 import sys
 
 from trading_bot.bot import TradingBot
+from trading_bot.utils import setup_logging
 
 
-def main() -> None:
-    bot = TradingBot()
+def main() -> int:
+    log_path = setup_logging()
+
+    print(f"Log file: {log_path}")
 
     mode = (
         sys.argv[1].lower()
@@ -12,35 +16,52 @@ def main() -> None:
         else "test"
     )
 
-    if mode == "test":
-        bot.run()
+    try:
+        bot = TradingBot()
 
-    elif mode == "live":
-        bot.run_live_tracker()
+        if mode == "test":
+            bot.run()
 
-    elif mode == "strategy":
-        bot.run_strategy_test()
+        elif mode == "live":
+            bot.run_live_tracker()
 
-    elif mode == "write":
-        date_str = (
-            sys.argv[2]
-            if len(sys.argv) > 2
-            else None
-        )
+        elif mode == "strategy":
+            bot.run_strategy_test()
 
-        bot.run_strategy_and_write(
-            date_str=date_str
-        )
-    elif mode == "production":
-        bot.run_production()
+        elif mode == "write":
+            date_str = (
+                sys.argv[2]
+                if len(sys.argv) > 2
+                else None
+            )
 
-    else:
-        print(f"Unknown mode: {mode}")
-        print(
-            "Available modes: "
-            "test, live, strategy, write, production"
-        )
+            bot.run_strategy_and_write(
+                date_str=date_str
+            )
+
+        elif mode == "production":
+            bot.run_production()
+
+        else:
+            print(f"Unknown mode: {mode}")
+            print(
+                "Available modes: "
+                "test, live, strategy, write, production"
+            )
+            return 2
+
+    except KeyboardInterrupt:
+        print("Bot stopped by user.")
+        return 130
+
+    except Exception:
+        logging.getLogger(
+            "trading_bot"
+        ).exception("Bot workflow failed.")
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

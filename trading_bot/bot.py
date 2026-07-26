@@ -218,17 +218,32 @@ class TradingBot:
             opening_bar = opening_bars.get(symbol)
             atr = atrs.get(symbol)
 
+            stock.opening_bar = opening_bar
+            stock.atr = atr
+
             if opening_bar is None or atr is None:
-                stock.opening_bar = opening_bar
-                stock.atr = atr
                 stock.signal = "NO INVEST"
+
+                print(
+                    f"{symbol}: strategy skipped because "
+                    "valid opening-bar or ATR data was unavailable."
+                )
                 continue
 
-            self.strategy.evaluate(
-                stock=stock,
-                opening_bar=opening_bar,
-                atr=atr,
-            )
+            try:
+                self.strategy.evaluate(
+                    stock=stock,
+                    opening_bar=opening_bar,
+                    atr=atr,
+                )
+
+            except Exception as error:
+                stock.signal = "NO INVEST"
+
+                print(
+                    f"{symbol}: strategy evaluation failed: "
+                    f"{error}"
+                )
 
     def run_strategy_and_write(
             self,
@@ -260,15 +275,43 @@ class TradingBot:
 
         self.initialise_sheets()
 
-        self.sheets.write_strategy_results(
-            date_str=date_str,
-            stocks=self.stocks,
-        )
+        write_errors = []
 
-        self.sheets.write_orders(
-            date_str=date_str,
-            stocks=self.stocks,
-        )
+        try:
+            self.sheets.write_strategy_results(
+                date_str=date_str,
+                stocks=self.stocks,
+            )
+
+        except Exception as error:
+            write_errors.append(
+                f"Invest sheet: {error}"
+            )
+            print(
+                "Invest sheet write failed. "
+                f"Error: {error}"
+            )
+
+        try:
+            self.sheets.write_orders(
+                date_str=date_str,
+                stocks=self.stocks,
+            )
+
+        except Exception as error:
+            write_errors.append(
+                f"Orders sheet: {error}"
+            )
+            print(
+                "Orders sheet write failed. "
+                f"Error: {error}"
+            )
+
+        if write_errors:
+            raise RuntimeError(
+                "One or more strategy writes failed: "
+                + " | ".join(write_errors)
+            )
 
         print("Strategy results written successfully.")
 
