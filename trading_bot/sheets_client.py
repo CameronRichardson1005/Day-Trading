@@ -1,7 +1,12 @@
 import gspread
 from google.oauth2.service_account import Credentials
 
-from .config import CREDS_FILE, SCOPES, SHEET_NAME
+from .config import (
+    CREDS_FILE,
+    SCOPES,
+    SHEETS_REQUEST_TIMEOUT,
+    SPREADSHEET_ID,
+)
 
 WHITE = {
     "red": 1,
@@ -35,7 +40,14 @@ class SheetsClient:
         )
 
         self.google_client = gspread.authorize(self.credentials)
-        self.spreadsheet = self.google_client.open(SHEET_NAME)
+        self.google_client.set_timeout(
+            SHEETS_REQUEST_TIMEOUT
+        )
+        self.spreadsheet = (
+            self.google_client.open_by_key(
+                SPREADSHEET_ID
+            )
+        )
 
     def get_or_create_worksheet(
         self,

@@ -43,7 +43,17 @@ CANDIDATE_TICKERS = [
 ATR_MULTIPLIER = 0.25
 STOP_BUFFER = 0.05
 
-SHEET_NAME = "Day Trading Sheet"
+SPREADSHEET_ID = os.getenv(
+    "GOOGLE_SPREADSHEET_ID",
+    "1fe4SD1jGvZ9bVudcFc--o8fwlHoiAxZSYeMUypNVFOQ",
+).strip()
+
+if not SPREADSHEET_ID:
+    raise RuntimeError(
+        "GOOGLE_SPREADSHEET_ID cannot be empty."
+    )
+
+SHEETS_REQUEST_TIMEOUT = (10, 20)
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
