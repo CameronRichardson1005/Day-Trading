@@ -225,6 +225,99 @@ class TradingBot:
 
         return True
 
+    def run_preflight(
+            self,
+            date_str: str | None = None,
+    ) -> bool:
+        if date_str is None:
+            eastern = ZoneInfo(
+                "America/New_York"
+            )
+            date_str = (
+                datetime.now(eastern)
+                .date()
+                .isoformat()
+            )
+
+        print()
+        print("===================================")
+        print(" Trading Bot Preflight")
+        print("===================================")
+        print(f"Preflight date: {date_str}")
+
+        selected_symbols = (
+            self.refresh_symbols_for_date(date_str)
+        )
+
+        if self.scanner_statistics is None:
+            print(
+                "Preflight failed: scanner statistics "
+                "were unavailable."
+            )
+            return False
+
+        if not selected_symbols:
+            print(
+                "Preflight failed: no symbols were "
+                "selected."
+            )
+            return False
+
+        print("Scanner check passed.")
+        print(
+            "Checking Google Sheets and tracker "
+            "initialisation..."
+        )
+
+        try:
+            self.initialise_sheets()
+            worksheet_names = (
+                self.sheets.test_connection()
+            )
+        except Exception as error:
+            print(
+                "Preflight failed during Google Sheets "
+                "or tracker initialisation."
+            )
+            print(f"Preflight error: {error}")
+            return False
+
+        required_worksheets = {
+            "Scanner Dashboard",
+            "1 minute intervals",
+        }
+
+        missing_worksheets = sorted(
+            required_worksheets.difference(
+                worksheet_names
+            )
+        )
+
+        if missing_worksheets:
+            print(
+                "Preflight failed: missing worksheets: "
+                + ", ".join(missing_worksheets)
+            )
+            return False
+
+        if self.tracker is None:
+            print(
+                "Preflight failed: minute tracker was "
+                "not initialised."
+            )
+            return False
+
+        print("Google Sheets check passed.")
+        print("Minute tracker initialisation passed.")
+        print()
+        print("Preflight completed successfully.")
+        print(
+            "No minute tracking, strategy, dashboard "
+            "write, or order workflow was started."
+        )
+
+        return True
+
     def run_live_tracker(self) -> None:
         eastern = ZoneInfo("America/New_York")
         utc = ZoneInfo("UTC")
