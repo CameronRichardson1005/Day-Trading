@@ -161,6 +161,60 @@ class AlpacaClient:
             for symbol in self._symbols_from_csv(symbols_csv)
         }
 
+    def get_historical_1min_bars(
+        self,
+        symbols_csv: str,
+        start_iso: str,
+        end_iso: str,
+    ) -> dict[str, list[dict]]:
+        """
+        Fetch every valid historical 1-minute bar in
+        chronological order for an isolated replay.
+        """
+        params = {
+            "symbols": symbols_csv,
+            "timeframe": "1Min",
+            "start": start_iso,
+            "end": end_iso,
+            "adjustment": "raw",
+            "feed": "iex",
+            "currency": "usd",
+            "limit": 1000,
+            "sort": "asc",
+        }
+
+        data = self._request(
+            params=params,
+            label="Historical replay bars fetch",
+        )
+
+        bars_by_symbol = data.get("bars", {})
+        results: dict[str, list[dict]] = {}
+
+        for symbol in self._symbols_from_csv(symbols_csv):
+            raw_bars = bars_by_symbol.get(symbol, [])
+
+            if not isinstance(raw_bars, list):
+                print(
+                    f"{symbol}: malformed historical replay response"
+                )
+                results[symbol] = []
+                continue
+
+            valid_bars = [
+                bar
+                for bar in raw_bars
+                if self._is_valid_bar(bar)
+            ]
+
+            valid_bars.sort(
+                key=lambda bar: str(bar["t"])
+            )
+
+            results[symbol] = valid_bars
+
+        return results
+
     def get_opening_15min_bars(
             self,
             symbols_csv: str,

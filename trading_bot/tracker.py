@@ -100,8 +100,8 @@ class MinuteTracker:
             if row[0] == date_str and row[1] in self.stocks:
                 self.symbol_rows[row[1]] = row_number
 
+    @staticmethod
     def process_bar(
-        self,
         stock: Stock,
         bar: dict[str, Any],
     ) -> tuple[bool, bool, str]:

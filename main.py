@@ -67,6 +67,39 @@ def main() -> int:
                 date_str=date_str
             )
 
+        elif mode == "replay":
+            if len(sys.argv) < 3:
+                print(
+                    "Usage: python main.py replay "
+                    "YYYY-MM-DD [--speed NUMBER]"
+                )
+                return 2
+
+            date_str = sys.argv[2]
+            speed = 60.0
+
+            if len(sys.argv) > 3:
+                if (
+                    len(sys.argv) != 5
+                    or sys.argv[3] != "--speed"
+                ):
+                    print(
+                        "Usage: python main.py replay "
+                        "YYYY-MM-DD [--speed NUMBER]"
+                    )
+                    return 2
+
+                try:
+                    speed = float(sys.argv[4])
+                except ValueError:
+                    print("Replay speed must be a number.")
+                    return 2
+
+            bot.run_replay(
+                date_str=date_str,
+                speed=speed,
+            )
+
         elif mode == "production":
             bot.run_production()
 
@@ -74,7 +107,7 @@ def main() -> int:
             print(f"Unknown mode: {mode}")
             print(
                 "Available modes: "
-                "test, smoke, preflight, live, strategy, write, production"
+                "test, smoke, preflight, live, strategy, write, replay, production"
             )
             return 2
 

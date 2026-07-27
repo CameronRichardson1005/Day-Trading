@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from .alpaca_client import AlpacaClient
 from .config import CANDIDATE_TICKERS, TICKERS
 from .models import Stock
+from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
 from .strategy import ManipulationStrategy
@@ -385,6 +386,137 @@ class TradingBot:
             date_str=date_str,
             window_start=window_start,
             window_end=window_end,
+        )
+
+    def run_replay(
+            self,
+            date_str: str,
+            speed: float = 60.0,
+    ) -> None:
+        try:
+            trading_date = datetime.strptime(
+                date_str,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Replay date must use YYYY-MM-DD format."
+            ) from error
+
+        if trading_date.weekday() >= 5:
+            raise ValueError(
+                "Replay date must be a weekday."
+            )
+
+        if speed < 0:
+            raise ValueError(
+                "Replay speed cannot be negative."
+            )
+
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        window_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        window_end = (
+            window_start
+            + timedelta(minutes=15)
+            - timedelta(seconds=1)
+        )
+
+        print()
+        print("===================================")
+        print(" Historical Trading Replay")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(f"Replay speed: {speed:g}x")
+        print(
+            "READ-ONLY MODE: Google Sheets, Orders, "
+            "and trading are disabled."
+        )
+
+        self.refresh_symbols_for_date(date_str)
+
+        bars_by_symbol = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=self.symbols_csv,
+                start_iso=window_start.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                end_iso=window_end.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+
+        atrs = self.alpaca.get_previous_day_ranges_all(
+            symbols_csv=self.symbols_csv,
+            date_str=date_str,
+        )
+
+        replay = HistoricalReplay(
+            stocks=self.stocks,
+            strategy=self.strategy,
+            speed=speed,
+        )
+
+        summary = replay.run(
+            date_str=date_str,
+            window_start=window_start,
+            bars_by_symbol=bars_by_symbol,
+            atrs=atrs,
+        )
+
+        print()
+        print("===== REPLAY RESULTS =====")
+
+        for symbol, stock in self.stocks.items():
+            processed = summary.processed_bars[symbol]
+
+            print()
+            print(f"Symbol: {symbol}")
+            print(
+                f"Bars processed: {processed}/15"
+            )
+            print(
+                f"Green/Red minutes: "
+                f"{stock.green_minutes}/"
+                f"{stock.red_minutes}"
+            )
+            print(
+                f"New highs/lows: "
+                f"{stock.new_highs}/"
+                f"{stock.new_lows}"
+            )
+
+            if stock.opening_bar is None:
+                print("Opening candle: incomplete")
+                print("Signal: NO INVEST")
+                continue
+
+            print(
+                "Opening O/H/L/C: "
+                f"{float(stock.opening_bar['o']):.4f} / "
+                f"{float(stock.opening_bar['h']):.4f} / "
+                f"{float(stock.opening_bar['l']):.4f} / "
+                f"{float(stock.opening_bar['c']):.4f}"
+            )
+
+            if stock.atr is None:
+                print("ATR: unavailable")
+            else:
+                print(f"ATR: {stock.atr:.4f}")
+
+            print(f"Signal: {stock.signal}")
+
+        print()
+        print("Historical replay completed.")
+        print(
+            "No spreadsheets or orders were created."
         )
 
     def run_strategy_test(self) -> None:
