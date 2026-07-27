@@ -177,8 +177,8 @@ def test_after_opening_window_runs_strategy_immediately(
                 2026,
                 7,
                 27,
-                10,
-                0,
+                9,
+                50,
                 tzinfo=EASTERN,
             ),
         ],
@@ -197,3 +197,105 @@ def test_after_opening_window_runs_strategy_immediately(
     assert events == [
         "strategy:2026-07-27",
     ]
+
+def test_production_stops_after_cutoff(
+        monkeypatch,
+        capsys,
+):
+    import trading_bot.bot as production_bot_module
+
+    real_datetime = production_bot_module.datetime
+
+    class CutoffDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(
+                2026,
+                7,
+                27,
+                10,
+                0,
+                tzinfo=tz,
+            )
+
+    monkeypatch.setattr(
+        production_bot_module,
+        "datetime",
+        CutoffDateTime,
+    )
+
+    bot = object.__new__(
+        production_bot_module.TradingBot
+    )
+
+    def unexpected_workflow(*args, **kwargs):
+        raise AssertionError(
+            "Production workflow should not start "
+            "after the cutoff."
+        )
+
+    bot.run_live_tracker = unexpected_workflow
+    bot.run_strategy_and_write = unexpected_workflow
+
+    bot.run_production()
+
+    output = capsys.readouterr().out
+
+    assert (
+        "The 10:00 New York production cutoff "
+        "has passed."
+        in output
+    )
+    assert (
+        "spreadsheet writes were not started."
+        in output
+    )
+
+
+def test_tracking_failure_prevents_strategy_write(
+        monkeypatch,
+):
+    import pytest
+    import trading_bot.bot as production_bot_module
+
+    real_datetime = production_bot_module.datetime
+
+    class OpeningWindowDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(
+                2026,
+                7,
+                27,
+                9,
+                35,
+                tzinfo=tz,
+            )
+
+    monkeypatch.setattr(
+        production_bot_module,
+        "datetime",
+        OpeningWindowDateTime,
+    )
+
+    bot = object.__new__(
+        production_bot_module.TradingBot
+    )
+
+    def fail_tracking():
+        raise RuntimeError("Tracker failed.")
+
+    def unexpected_strategy(*args, **kwargs):
+        raise AssertionError(
+            "Strategy writes must not run after "
+            "a tracking failure."
+        )
+
+    bot.run_live_tracker = fail_tracking
+    bot.run_strategy_and_write = unexpected_strategy
+
+    with pytest.raises(
+        RuntimeError,
+        match="Tracker failed",
+    ):
+        bot.run_production()

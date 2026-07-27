@@ -572,11 +572,29 @@ class TradingBot:
             tzinfo=eastern,
         ) + timedelta(seconds=15)
 
+        production_cutoff = datetime.combine(
+            now.date(),
+            time(hour=10),
+            tzinfo=eastern,
+        )
+
         print()
         print("===================================")
         print(" Production Trading Mode")
         print("===================================")
         print(f"Trading date: {date_str}")
+
+        if now >= production_cutoff:
+            print()
+            print(
+                "The 10:00 New York production cutoff "
+                "has passed."
+            )
+            print(
+                "Tracking, strategy calculation, and "
+                "spreadsheet writes were not started."
+            )
+            return
 
         if now < market_open:
             wait_seconds = (
