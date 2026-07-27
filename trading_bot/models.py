@@ -40,3 +40,6 @@ class Stock:
 
     stop_loss: float | None = None
     trading_stop_loss: float | None = None
+
+    # Read-only replay outcome
+    outcome: dict[str, Any] | None = None

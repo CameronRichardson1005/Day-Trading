@@ -255,3 +255,171 @@ def test_main_dispatches_replay_mode(
     assert events == [
         ("2026-07-23", 60.0),
     ]
+
+
+def outcome_bar(
+    timestamp: str,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+) -> dict:
+    return {
+        "o": open_price,
+        "h": high_price,
+        "l": low_price,
+        "c": close_price,
+        "v": 100,
+        "t": timestamp,
+    }
+
+
+def outcome_stock(symbol: str) -> Stock:
+    stock = Stock(symbol=symbol)
+    stock.signal = "INVEST"
+    stock.limit_buy = 10.0
+    stock.limit_sell = 11.0
+    stock.stop_loss = 9.0
+    return stock
+
+
+def test_replay_calculates_all_outcome_states():
+    stocks = {
+        "WIN": outcome_stock("WIN"),
+        "LOSS": outcome_stock("LOSS"),
+        "NONE": outcome_stock("NONE"),
+        "OPEN": outcome_stock("OPEN"),
+    }
+
+    replay = HistoricalReplay(
+        stocks=stocks,
+        strategy=RecordingStrategy(),
+        speed=0,
+    )
+
+    replay.calculate_outcomes({
+        "WIN": [
+            outcome_bar(
+                "2026-07-23T13:45:00Z",
+                10.2,
+                10.4,
+                9.9,
+                10.1,
+            ),
+            outcome_bar(
+                "2026-07-23T13:46:00Z",
+                10.5,
+                11.1,
+                10.4,
+                11.0,
+            ),
+        ],
+        "LOSS": [
+            outcome_bar(
+                "2026-07-23T13:45:00Z",
+                10.0,
+                11.1,
+                8.9,
+                9.5,
+            ),
+        ],
+        "NONE": [
+            outcome_bar(
+                "2026-07-23T13:45:00Z",
+                10.7,
+                10.9,
+                10.5,
+                10.8,
+            ),
+        ],
+        "OPEN": [
+            outcome_bar(
+                "2026-07-23T13:45:00Z",
+                10.1,
+                10.5,
+                9.9,
+                10.3,
+            ),
+        ],
+    })
+
+    assert stocks["WIN"].outcome["status"] == "WIN"
+    assert stocks["WIN"].outcome["pnlPerShare"] == 1.0
+    assert stocks["WIN"].outcome["returnPct"] == 10.0
+
+    assert stocks["LOSS"].outcome["status"] == "LOSS"
+    assert stocks["LOSS"].outcome["pnlPerShare"] == -1.0
+    assert "conservative loss" in (
+        stocks["LOSS"].outcome["detail"]
+    )
+
+    assert stocks["NONE"].outcome["status"] == "NO ENTRY"
+    assert stocks["OPEN"].outcome["status"] == "STILL OPEN"
+
+
+def test_historical_fetch_follows_pagination():
+    client = object.__new__(AlpacaClient)
+    requested_tokens = []
+
+    def fake_request(**kwargs):
+        token = kwargs["params"].get("page_token")
+        requested_tokens.append(token)
+
+        if token is None:
+            return {
+                "bars": {
+                    "TEST": [
+                        make_bar(
+                            datetime(
+                                2026,
+                                7,
+                                23,
+                                13,
+                                31,
+                                tzinfo=UTC,
+                            ),
+                            10.0,
+                        ),
+                    ],
+                },
+                "next_page_token": "NEXT",
+            }
+
+        return {
+            "bars": {
+                "TEST": [
+                    make_bar(
+                        datetime(
+                            2026,
+                            7,
+                            23,
+                            13,
+                            30,
+                            tzinfo=UTC,
+                        ),
+                        9.0,
+                    ),
+                ],
+            },
+            "next_page_token": None,
+        }
+
+    client._request = fake_request
+
+    result = client.get_historical_1min_bars(
+        symbols_csv="TEST",
+        start_iso="2026-07-23T13:30:00Z",
+        end_iso="2026-07-23T20:00:00Z",
+    )
+
+    assert requested_tokens == [
+        None,
+        "NEXT",
+    ]
+    assert [
+        bar["t"]
+        for bar in result["TEST"]
+    ] == [
+        "2026-07-23T13:30:00Z",
+        "2026-07-23T13:31:00Z",
+    ]

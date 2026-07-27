@@ -177,3 +177,32 @@ def test_publish_uses_read_only_endpoint_contract():
         ),
     }
     assert calls[0][1]["timeout"] == (5, 15)
+
+
+def test_complete_invest_includes_outcome():
+    stock = complete_stock()
+    stock.outcome = {
+        "status": "WIN",
+        "entryTime": "09:45",
+        "exitTime": "10:12",
+        "entryPrice": 9.0,
+        "exitPrice": 9.382,
+        "pnlPerShare": 0.382,
+        "returnPct": 4.244444,
+        "detail": "Profit target reached first.",
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-07-23",
+        source="REPLAY",
+        stocks={
+            "TEST": stock,
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+    )
+
+    assert payload["symbols"][0]["outcome"] == (
+        stock.outcome
+    )

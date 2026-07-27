@@ -520,6 +520,34 @@ class TradingBot:
             atrs=atrs,
         )
 
+        outcome_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=45),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        outcome_end = datetime.combine(
+            trading_date,
+            time(hour=16),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        outcome_bars = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=self.symbols_csv,
+                start_iso=outcome_start.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                end_iso=outcome_end.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+            )
+        )
+
+        replay.calculate_outcomes(
+            bars_by_symbol=outcome_bars
+        )
+
         print()
         print("===== REPLAY RESULTS =====")
 

@@ -168,10 +168,12 @@ class AlpacaClient:
         end_iso: str,
     ) -> dict[str, list[dict]]:
         """
-        Fetch every valid historical 1-minute bar in
-        chronological order for an isolated replay.
+        Fetch all valid historical one-minute bars in
+        chronological order, following Alpaca pagination.
         """
-        params = {
+        symbols = self._symbols_from_csv(symbols_csv)
+
+        base_params = {
             "symbols": symbols_csv,
             "timeframe": "1Min",
             "start": start_iso,
@@ -183,35 +185,56 @@ class AlpacaClient:
             "sort": "asc",
         }
 
-        data = self._request(
-            params=params,
-            label="Historical replay bars fetch",
-        )
+        results = {
+            symbol: []
+            for symbol in symbols
+        }
 
-        bars_by_symbol = data.get("bars", {})
-        results: dict[str, list[dict]] = {}
+        page_token = None
 
-        for symbol in self._symbols_from_csv(symbols_csv):
-            raw_bars = bars_by_symbol.get(symbol, [])
+        while True:
+            params = dict(base_params)
 
-            if not isinstance(raw_bars, list):
-                print(
-                    f"{symbol}: malformed historical replay response"
-                )
-                results[symbol] = []
-                continue
+            if page_token:
+                params["page_token"] = page_token
 
-            valid_bars = [
-                bar
-                for bar in raw_bars
-                if self._is_valid_bar(bar)
-            ]
-
-            valid_bars.sort(
-                key=lambda bar: str(bar["t"])
+            data = self._request(
+                params=params,
+                label="Historical replay bars fetch",
             )
 
-            results[symbol] = valid_bars
+            bars_by_symbol = data.get("bars", {})
+
+            if not isinstance(bars_by_symbol, dict):
+                raise RuntimeError(
+                    "Malformed historical replay response."
+                )
+
+            for symbol in symbols:
+                raw_bars = bars_by_symbol.get(symbol, [])
+
+                if not isinstance(raw_bars, list):
+                    print(
+                        f"{symbol}: malformed historical "
+                        "replay response"
+                    )
+                    continue
+
+                results[symbol].extend(
+                    bar
+                    for bar in raw_bars
+                    if self._is_valid_bar(bar)
+                )
+
+            page_token = data.get("next_page_token")
+
+            if not page_token:
+                break
+
+        for bars in results.values():
+            bars.sort(
+                key=lambda bar: str(bar["t"])
+            )
 
         return results
 

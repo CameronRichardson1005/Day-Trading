@@ -237,6 +237,15 @@ class DashboardExporter:
         if minute_bars:
             payload["minuteBars"] = minute_bars
 
+        if (
+            strategy_complete
+            and stock.signal == "INVEST"
+            and stock.outcome is not None
+        ):
+            payload["outcome"] = dict(
+                stock.outcome
+            )
+
         return payload
 
     @classmethod

@@ -115,6 +115,167 @@ class HistoricalReplay:
         stock.limit_sell = None
         stock.stop_loss = None
         stock.trading_stop_loss = None
+        stock.outcome = None
+
+    @staticmethod
+    def _outcome_time(bar: dict[str, Any]) -> str:
+        timestamp = datetime.fromisoformat(
+            str(bar["t"]).replace(
+                "Z",
+                "+00:00",
+            )
+        )
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(
+                tzinfo=ZoneInfo("UTC")
+            )
+
+        return (
+            timestamp
+            .astimezone(
+                ZoneInfo("America/New_York")
+            )
+            .strftime("%H:%M")
+        )
+
+    @classmethod
+    def _closed_outcome(
+        cls,
+        status: str,
+        entry_time: str,
+        entry_price: float,
+        exit_time: str,
+        exit_price: float,
+        detail: str,
+    ) -> dict[str, Any]:
+        pnl_per_share = exit_price - entry_price
+        return_pct = (
+            pnl_per_share / entry_price
+        ) * 100.0
+
+        return {
+            "status": status,
+            "entryTime": entry_time,
+            "exitTime": exit_time,
+            "entryPrice": float(entry_price),
+            "exitPrice": float(exit_price),
+            "pnlPerShare": round(
+                pnl_per_share,
+                6,
+            ),
+            "returnPct": round(
+                return_pct,
+                6,
+            ),
+            "detail": detail,
+        }
+
+    def calculate_outcomes(
+        self,
+        bars_by_symbol: dict[str, list[dict]],
+    ) -> None:
+        """
+        Calculate hypothetical post-09:45 results.
+
+        This performs historical analysis only and cannot
+        create, modify, or cancel an order.
+        """
+        for symbol, stock in self.stocks.items():
+            stock.outcome = None
+
+            if stock.signal != "INVEST":
+                continue
+
+            levels = (
+                stock.limit_buy,
+                stock.limit_sell,
+                stock.stop_loss,
+            )
+
+            if not all(
+                isinstance(value, (int, float))
+                for value in levels
+            ):
+                continue
+
+            entry_price = float(stock.limit_buy)
+            target_price = float(stock.limit_sell)
+            stop_price = float(stock.stop_loss)
+
+            entered = False
+            entry_time = None
+
+            for bar in bars_by_symbol.get(symbol, []):
+                high_price = float(bar["h"])
+                low_price = float(bar["l"])
+                bar_time = self._outcome_time(bar)
+
+                if not entered:
+                    if low_price > entry_price:
+                        continue
+
+                    entered = True
+                    entry_time = bar_time
+
+                target_hit = high_price >= target_price
+                stop_hit = low_price <= stop_price
+
+                # Intraminute ordering is unknown. If both
+                # levels are touched, use the conservative
+                # result.
+                if stop_hit:
+                    detail = (
+                        "Target and stop were both touched "
+                        "in the same minute; recorded as a "
+                        "conservative loss."
+                        if target_hit
+                        else "Stop-loss reached first."
+                    )
+
+                    stock.outcome = self._closed_outcome(
+                        status="LOSS",
+                        entry_time=entry_time,
+                        entry_price=entry_price,
+                        exit_time=bar_time,
+                        exit_price=stop_price,
+                        detail=detail,
+                    )
+                    break
+
+                if target_hit:
+                    stock.outcome = self._closed_outcome(
+                        status="WIN",
+                        entry_time=entry_time,
+                        entry_price=entry_price,
+                        exit_time=bar_time,
+                        exit_price=target_price,
+                        detail="Profit target reached first.",
+                    )
+                    break
+
+            if stock.outcome is not None:
+                continue
+
+            if not entered:
+                stock.outcome = {
+                    "status": "NO ENTRY",
+                    "detail": (
+                        "The limit-buy price was not reached "
+                        "after 09:45 ET."
+                    ),
+                }
+            else:
+                stock.outcome = {
+                    "status": "STILL OPEN",
+                    "entryTime": entry_time,
+                    "entryPrice": entry_price,
+                    "detail": (
+                        "The trade entered, but neither target "
+                        "nor stop was reached before the "
+                        "session ended."
+                    ),
+                }
 
     def run(
         self,
