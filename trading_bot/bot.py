@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from .alpaca_client import AlpacaClient
 from .config import CANDIDATE_TICKERS, TICKERS
+from .dashboard_exporter import DashboardExporter
 from .models import Stock
 from .replay import HistoricalReplay
 from .scanner import StockScanner
@@ -31,6 +32,7 @@ class TradingBot:
 
         self.sheets = None
         self.tracker = None
+        self.dashboard = DashboardExporter()
 
     def refresh_symbols_for_date(
             self,
@@ -388,6 +390,53 @@ class TradingBot:
             window_end=window_end,
         )
 
+        processed_bars = {
+            symbol: (
+                stock.green_minutes
+                + stock.red_minutes
+            )
+            for symbol, stock in getattr(self, "stocks", {}).items()
+        }
+
+        self._publish_dashboard_session(
+            date_str=date_str,
+            source="LIVE",
+            processed_bars=processed_bars,
+        )
+
+    def _publish_dashboard_session(
+            self,
+            date_str: str,
+            source: str,
+            processed_bars: dict[str, int],
+    ) -> None:
+        try:
+            result = self.dashboard.publish(
+                date_str=date_str,
+                source=source,
+                stocks=self.stocks,
+                processed_bars=processed_bars,
+            )
+        except Exception as error:
+            print(
+                "Dashboard upload failed. "
+                "Trading-bot processing is unchanged."
+            )
+            print(f"Dashboard error: {error}")
+            return
+
+        if result is None:
+            print(
+                "Dashboard upload skipped: "
+                "DASHBOARD_INGEST_KEY is not configured."
+            )
+            return
+
+        print(
+            "Dashboard session uploaded: "
+            f"{result['status']}."
+        )
+
     def run_replay(
             self,
             date_str: str,
@@ -517,6 +566,12 @@ class TradingBot:
         print("Historical replay completed.")
         print(
             "No spreadsheets or orders were created."
+        )
+
+        self._publish_dashboard_session(
+            date_str=date_str,
+            source="REPLAY",
+            processed_bars=summary.processed_bars,
         )
 
     def run_strategy_test(self) -> None:

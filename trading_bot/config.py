@@ -43,6 +43,27 @@ CANDIDATE_TICKERS = [
 ATR_MULTIPLIER = 0.25
 STOP_BUFFER = 0.05
 
+DASHBOARD_URL = os.getenv(
+    "DASHBOARD_URL",
+    (
+        "https://trading-bot-dashboard."
+        "icy-grebe-0605.chatgpt.site"
+        "/api/sessions/latest"
+    ),
+).strip()
+
+DASHBOARD_INGEST_KEY = os.getenv(
+    "DASHBOARD_INGEST_KEY",
+    "",
+).strip()
+
+DASHBOARD_SITE_TOKEN = os.getenv(
+    "DASHBOARD_SITE_TOKEN",
+    "",
+).strip()
+
+DASHBOARD_REQUEST_TIMEOUT = (5, 15)
+
 SPREADSHEET_ID = os.getenv(
     "GOOGLE_SPREADSHEET_ID",
     "1fe4SD1jGvZ9bVudcFc--o8fwlHoiAxZSYeMUypNVFOQ",
