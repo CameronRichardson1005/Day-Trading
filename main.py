@@ -22,6 +22,20 @@ def main() -> int:
         if mode == "test":
             bot.run()
 
+        elif mode == "smoke":
+            date_str = (
+                sys.argv[2]
+                if len(sys.argv) > 2
+                else None
+            )
+
+            succeeded = bot.run_scanner_smoke(
+                date_str=date_str
+            )
+
+            if not succeeded:
+                return 1
+
         elif mode == "live":
             bot.run_live_tracker()
 
@@ -46,7 +60,7 @@ def main() -> int:
             print(f"Unknown mode: {mode}")
             print(
                 "Available modes: "
-                "test, live, strategy, write, production"
+                "test, smoke, live, strategy, write, production"
             )
             return 2
 

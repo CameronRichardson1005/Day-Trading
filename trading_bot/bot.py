@@ -172,6 +172,59 @@ class TradingBot:
         print()
         print("Bot Started Successfully")
 
+    def run_scanner_smoke(
+            self,
+            date_str: str | None = None,
+    ) -> bool:
+        if date_str is None:
+            eastern = ZoneInfo(
+                "America/New_York"
+            )
+            date_str = (
+                datetime.now(eastern)
+                .date()
+                .isoformat()
+            )
+
+        print()
+        print("===================================")
+        print(" Scanner Dashboard Smoke Test")
+        print("===================================")
+        print(f"Scanner date: {date_str}")
+
+        selected_symbols = (
+            self.refresh_symbols_for_date(date_str)
+        )
+
+        if self.scanner_statistics is None:
+            print(
+                "Smoke test failed because scanner "
+                "statistics were unavailable."
+            )
+            return False
+
+        if self.sheets is None:
+            self.sheets = SheetsClient()
+
+        self.sheets.write_scanner_dashboard(
+            date_str=date_str,
+            statistics=self.scanner_statistics,
+            selected_symbols=selected_symbols,
+            scanner=self.scanner,
+        )
+
+        print()
+        print(
+            "Scanner dashboard smoke test "
+            "completed successfully."
+        )
+        print(
+            "No minute tracking, strategy, or "
+            "order workflow was started."
+        )
+
+        return True
+
     def run_live_tracker(self) -> None:
         eastern = ZoneInfo("America/New_York")
         utc = ZoneInfo("UTC")
