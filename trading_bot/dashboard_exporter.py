@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -61,6 +62,124 @@ class DashboardExporter:
             ),
         }
 
+    @staticmethod
+    def _bar_time(bar: dict[str, Any]) -> str:
+        raw_timestamp = str(bar["t"])
+        normalised = raw_timestamp.replace(
+            "Z",
+            "+00:00",
+        )
+
+        timestamp = datetime.fromisoformat(
+            normalised
+        )
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(
+                tzinfo=timezone.utc
+            )
+
+        return (
+            timestamp
+            .astimezone(
+                ZoneInfo("America/New_York")
+            )
+            .strftime("%H:%M")
+        )
+
+    @classmethod
+    def _minute_bars(
+            cls,
+            stock: Stock,
+    ) -> list[dict[str, Any]]:
+        result = []
+
+        for bar in stock.minute_bars[
+            :cls.EXPECTED_BARS
+        ]:
+            payload = {
+                "time": cls._bar_time(bar),
+                "open": float(bar["o"]),
+                "high": float(bar["h"]),
+                "low": float(bar["l"]),
+                "close": float(bar["c"]),
+            }
+
+            volume = bar.get("v")
+            if isinstance(volume, (int, float)):
+                payload["volume"] = float(volume)
+
+            result.append(payload)
+
+        return result
+
+    @staticmethod
+    def _strategy_payload(
+            stock: Stock,
+    ) -> dict[str, Any]:
+        opening_bar = stock.opening_bar
+
+        return {
+            "atr": float(stock.atr),
+            "openingOpen": float(
+                opening_bar["o"]
+            ),
+            "openingHigh": float(
+                opening_bar["h"]
+            ),
+            "openingLow": float(
+                opening_bar["l"]
+            ),
+            "openingClose": float(
+                opening_bar["c"]
+            ),
+            "candleRange": float(
+                stock.candle_range
+            ),
+            "atrThreshold": float(
+                stock.atr_threshold
+            ),
+            "isManipulation": (
+                stock.is_manipulation
+            ),
+            "isRed": stock.is_red,
+        }
+
+    @staticmethod
+    def _rules(
+            stock: Stock,
+    ) -> list[dict[str, Any]]:
+        opening_bar = stock.opening_bar
+
+        return [
+            {
+                "label": "Manipulation candle",
+                "passed": stock.is_manipulation,
+                "actual": (
+                    f"Range ${stock.candle_range:.4f}; "
+                    f"ATR threshold "
+                    f"${stock.atr_threshold:.4f}"
+                ),
+                "requirement": (
+                    "Range exceeds the ATR threshold "
+                    "or is within $0.0050"
+                ),
+            },
+            {
+                "label": "Red opening candle",
+                "passed": stock.is_red,
+                "actual": (
+                    f"Open ${float(opening_bar['o']):.4f}; "
+                    f"close "
+                    f"${float(opening_bar['c']):.4f}"
+                ),
+                "requirement": (
+                    "Opening close is below "
+                    "the opening price"
+                ),
+            },
+        ]
+
     @classmethod
     def _symbol_payload(
             cls,
@@ -107,6 +226,16 @@ class DashboardExporter:
             and levels is not None
         ):
             payload["levels"] = levels
+
+        if strategy_complete:
+            payload["rules"] = cls._rules(stock)
+            payload["strategy"] = (
+                cls._strategy_payload(stock)
+            )
+
+        minute_bars = cls._minute_bars(stock)
+        if minute_bars:
+            payload["minuteBars"] = minute_bars
 
         return payload
 

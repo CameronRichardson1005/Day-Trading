@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -9,6 +9,10 @@ class Stock:
     # Real-time 1-minute tracking
     running_high: float | None = None
     running_low: float | None = None
+
+    minute_bars: list[dict[str, Any]] = field(
+        default_factory=list
+    )
 
     green_minutes: int = 0
     red_minutes: int = 0

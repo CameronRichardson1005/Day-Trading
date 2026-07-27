@@ -16,6 +16,10 @@ def complete_stock(
         "c": 9.5,
     }
     stock.atr = 1.0
+    stock.candle_range = 2.0
+    stock.atr_threshold = 0.5
+    stock.is_manipulation = True
+    stock.is_red = True
     stock.signal = signal
     stock.limit_buy = 9.0
     stock.limit_sell = 9.382

@@ -96,6 +96,7 @@ class HistoricalReplay:
     def _reset_stock(stock: Stock) -> None:
         stock.running_high = None
         stock.running_low = None
+        stock.minute_bars.clear()
         stock.green_minutes = 0
         stock.red_minutes = 0
         stock.new_highs = 0
@@ -210,6 +211,7 @@ class HistoricalReplay:
                 )
 
                 revealed_bars[symbol].append(bar)
+                stock.minute_bars.append(dict(bar))
                 processed_bars[symbol] += 1
                 minute_count += 1
 
