@@ -20,20 +20,32 @@ class MinuteTracker:
     def __init__(
         self,
         alpaca: AlpacaClient,
-        sheets: SheetsClient,
+        sheets: SheetsClient | None,
         stocks: dict[str, Stock],
         symbols_csv: str,
+        write_sheets: bool = True,
     ) -> None:
         self.alpaca = alpaca
         self.sheets = sheets
         self.stocks = stocks
         self.symbols_csv = symbols_csv
+        self.write_sheets = write_sheets
 
-        self.worksheet = self.sheets.get_or_create_worksheet(
-            title="1 minute intervals",
-            rows=100,
-            cols=6,
-        )
+        if self.write_sheets:
+            if self.sheets is None:
+                raise ValueError(
+                    "SheetsClient is required when write_sheets=True."
+                )
+
+            self.worksheet = (
+                self.sheets.get_or_create_worksheet(
+                    title="1 minute intervals",
+                    rows=100,
+                    cols=6,
+                )
+            )
+        else:
+            self.worksheet = None
 
         self.symbol_rows: dict[str, int] = {}
 
@@ -42,6 +54,21 @@ class MinuteTracker:
         Guarantee exactly one tracking row per date and symbol.
         Existing duplicate keys are consolidated using their latest row.
         """
+        if not self.write_sheets:
+            self.symbol_rows = {
+                symbol: index
+                for index, symbol in enumerate(
+                    self.stocks,
+                    start=2,
+                )
+            }
+            return
+
+        if self.worksheet is None:
+            raise RuntimeError(
+                "Tracking worksheet was not initialised."
+            )
+
         existing_values = self.worksheet.get_all_values()
 
         if (
@@ -237,7 +264,12 @@ class MinuteTracker:
                     }
                 )
 
-        if sheet_updates:
+        if (
+            sheet_updates
+            and self.write_sheets
+            and self.sheets is not None
+            and self.worksheet is not None
+        ):
             self.sheets.update_tracking_minute(
                 worksheet=self.worksheet,
                 updates=sheet_updates,
@@ -365,7 +397,12 @@ class MinuteTracker:
                     }
                 )
 
-        if sheet_updates:
+        if (
+            sheet_updates
+            and self.write_sheets
+            and self.sheets is not None
+            and self.worksheet is not None
+        ):
             self.sheets.update_tracking_minute(
                 worksheet=self.worksheet,
                 updates=sheet_updates,
@@ -466,7 +503,12 @@ class MinuteTracker:
                     }
                 )
 
-            if tracking_updates:
+            if (
+                tracking_updates
+                and self.write_sheets
+                and self.sheets is not None
+                and self.worksheet is not None
+            ):
                 self.sheets.update_tracking_minute(
                     worksheet=self.worksheet,
                     updates=tracking_updates,

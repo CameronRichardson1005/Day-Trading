@@ -110,8 +110,11 @@ class TradingBot:
 
         return selected_symbols
 
-    def initialise_sheets(self) -> None:
-        if self.sheets is None:
+    def initialise_sheets(
+            self,
+            write_sheets: bool = True,
+    ) -> None:
+        if write_sheets and self.sheets is None:
             self.sheets = SheetsClient()
 
         if self.tracker is None:
@@ -120,6 +123,7 @@ class TradingBot:
                 sheets=self.sheets,
                 stocks=self.stocks,
                 symbols_csv=self.symbols_csv,
+                write_sheets=write_sheets,
             )
 
     def run(self) -> None:
@@ -338,7 +342,11 @@ class TradingBot:
 
         return True
 
-    def run_live_tracker(self) -> None:
+    def run_live_tracker(
+            self,
+            write_sheets: bool = True,
+            publish_dashboard: bool = True,
+    ) -> None:
         eastern = ZoneInfo("America/New_York")
         utc = ZoneInfo("UTC")
 
@@ -369,9 +377,16 @@ class TradingBot:
         selected_symbols = (
             self.refresh_symbols_for_date(date_str)
         )
-        self.initialise_sheets()
+        self.initialise_sheets(
+            write_sheets=write_sheets,
+        )
 
-        if self.scanner_statistics is not None:
+        if not write_sheets:
+            print(
+                "DRY-RUN MODE: Google Sheets and "
+                "scanner-dashboard writes are disabled."
+            )
+        elif self.scanner_statistics is not None:
             try:
                 self.sheets.write_scanner_dashboard(
                     date_str=date_str,
@@ -487,11 +502,16 @@ class TradingBot:
             for symbol, stock in getattr(self, "stocks", {}).items()
         }
 
-        self._publish_dashboard_session(
-            date_str=date_str,
-            source="LIVE",
-            processed_bars=processed_bars,
-        )
+        if publish_dashboard:
+            self._publish_dashboard_session(
+                date_str=date_str,
+                source="LIVE",
+                processed_bars=processed_bars,
+            )
+        else:
+            print(
+                "DRY-RUN MODE: Dashboard upload was skipped."
+            )
 
     def _publish_dashboard_session(
             self,

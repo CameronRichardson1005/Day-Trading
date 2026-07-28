@@ -174,9 +174,11 @@ def test_live_scanner_and_dashboard_run_before_tracking(
         ]
         return ["CORE", "SNAP"]
 
-    def fake_initialise():
+    def fake_initialise(
+            write_sheets: bool = True,
+    ):
         events.append(
-            ("initialise", None)
+            ("initialise", write_sheets)
         )
         bot.sheets = FakeSheets()
         bot.tracker = FakeTracker()
@@ -194,7 +196,7 @@ def test_live_scanner_and_dashboard_run_before_tracking(
 
     assert events == [
         ("refresh", "2026-07-27"),
-        ("initialise", None),
+        ("initialise", True),
         (
             "dashboard",
             "2026-07-27",
@@ -260,9 +262,11 @@ def test_dashboard_failure_does_not_stop_tracking(
         ]
         return ["CORE", "SNAP"]
 
-    def fake_initialise():
+    def fake_initialise(
+            write_sheets: bool = True,
+    ):
         events.append(
-            ("initialise", None)
+            ("initialise", write_sheets)
         )
         bot.sheets = FailingSheets()
         bot.tracker = FakeTracker()
@@ -280,7 +284,7 @@ def test_dashboard_failure_does_not_stop_tracking(
 
     assert events == [
         ("refresh", "2026-07-27"),
-        ("initialise", None),
+        ("initialise", True),
         ("dashboard", "2026-07-27"),
         ("track", "2026-07-27"),
     ]

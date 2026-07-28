@@ -54,6 +54,12 @@ def main() -> int:
         elif mode == "live":
             bot.run_live_tracker()
 
+        elif mode == "live-dry-run":
+            bot.run_live_tracker(
+                write_sheets=False,
+                publish_dashboard=False,
+            )
+
         elif mode == "strategy":
             bot.run_strategy_test()
 
@@ -218,7 +224,7 @@ def main() -> int:
             print(f"Unknown mode: {mode}")
             print(
                 "Available modes: "
-                "test, smoke, preflight, live, strategy, "
+                "test, smoke, preflight, live, live-dry-run, strategy, "
                 "write, replay, backtest, production"
             )
             return 2
