@@ -109,6 +109,35 @@ class TradingBot:
                         f"{record.usable_days} day(s)."
                     )
 
+            if reliability is not None:
+                selected_set = set(selected_symbols)
+
+                for record in reliability:
+                    if (
+                        record.usable_days
+                        < self.scanner.rules.minimum_reliability_days
+                    ):
+                        status = (
+                            "FALLBACK - INSUFFICIENT HISTORY"
+                        )
+                    elif record.symbol in selected_set:
+                        status = "SELECTED"
+                    elif (
+                        record.completeness
+                        < self.scanner.rules.minimum_opening_completeness
+                    ):
+                        status = (
+                            "EXCLUDED - LOW IEX RELIABILITY"
+                        )
+                    else:
+                        status = (
+                            "NOT SELECTED - RANKING LIMIT"
+                        )
+
+                    print(
+                        f"{record.symbol}: {status}"
+                    )
+
             self.scanner_statistics = statistics
 
         except Exception as error:
