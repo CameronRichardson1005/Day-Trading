@@ -340,7 +340,13 @@ class DashboardExporter:
             json=payload,
             timeout=self.timeout,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            raise RuntimeError(
+                f"Dashboard returned {response.status_code}: "
+                f"{response.text}"
+            ) from error
 
         result = response.json()
         if result.get("accepted") is not True:
