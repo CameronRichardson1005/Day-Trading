@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from threading import Event
 from typing import Any, Callable
 
@@ -188,7 +188,7 @@ class AlpacaStockStream:
             )
 
             while (
-                datetime.utcnow() < stop_time
+                datetime.now(UTC).replace(tzinfo=None) < stop_time
                 and not external_stop.is_set()
             ):
                 try:
