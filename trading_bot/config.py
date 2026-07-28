@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
-load_dotenv(dotenv_path=ENV_FILE, override=True)
+load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 
 API_KEY = os.getenv("ALPACA_API_KEY")
@@ -21,6 +21,18 @@ if not API_SECRET:
 
 
 BASE_URL = "https://data.alpaca.markets/v2/stocks/bars"
+
+ALPACA_DATA_FEED = os.getenv(
+    "ALPACA_DATA_FEED",
+    "sip",
+).strip().lower()
+
+if ALPACA_DATA_FEED not in {"iex", "sip"}:
+    raise RuntimeError(
+        "ALPACA_DATA_FEED must be 'iex' or 'sip'."
+    )
+
+MARKET_DATA_FEED = ALPACA_DATA_FEED
 
 TICKERS = [
     "BBAI",

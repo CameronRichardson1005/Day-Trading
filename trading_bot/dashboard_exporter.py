@@ -9,6 +9,7 @@ from .config import (
     DASHBOARD_REQUEST_TIMEOUT,
     DASHBOARD_SITE_TOKEN,
     DASHBOARD_URL,
+    MARKET_DATA_FEED,
 )
 from .models import Stock
 
@@ -255,11 +256,18 @@ class DashboardExporter:
             source: str,
             stocks: dict[str, Stock],
             processed_bars: dict[str, int],
+            data_feed: str = MARKET_DATA_FEED,
     ) -> dict[str, Any]:
         source = source.upper()
         if source not in {"REPLAY", "LIVE"}:
             raise ValueError(
                 "Dashboard source must be REPLAY or LIVE."
+            )
+
+        data_feed = data_feed.strip().lower()
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Dashboard sessions must use IEX or SIP market data."
             )
 
         symbols = [
@@ -291,6 +299,7 @@ class DashboardExporter:
             "id": f"{source.lower()}-{date_str}",
             "tradingDate": date_str,
             "source": source,
+            "dataFeed": data_feed.upper(),
             "status": status,
             "updatedAt": updated_at,
             "symbols": symbols,
@@ -302,6 +311,7 @@ class DashboardExporter:
             source: str,
             stocks: dict[str, Stock],
             processed_bars: dict[str, int],
+            data_feed: str = MARKET_DATA_FEED,
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -316,6 +326,7 @@ class DashboardExporter:
             source=source,
             stocks=stocks,
             processed_bars=processed_bars,
+            data_feed=data_feed,
         )
 
         response = self.post_fn(
