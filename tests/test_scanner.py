@@ -115,3 +115,71 @@ def test_current_symbols_are_always_retained():
         "OPEN",
         "SNAP",
     ]
+
+
+def test_reliability_filters_core_and_candidates():
+    from trading_bot.scanner import OpeningReliability
+
+    scanner = StockScanner(
+        current_symbols=["BBAI", "OPEN"],
+    )
+
+    statistics = [
+        make_stats("SNAP"),
+    ]
+
+    reliability = [
+        OpeningReliability(
+            symbol="BBAI",
+            usable_days=10,
+            total_bars=120,
+            expected_bars=150,
+        ),
+        OpeningReliability(
+            symbol="OPEN",
+            usable_days=10,
+            total_bars=145,
+            expected_bars=150,
+        ),
+        OpeningReliability(
+            symbol="SNAP",
+            usable_days=10,
+            total_bars=140,
+            expected_bars=150,
+        ),
+    ]
+
+    assert scanner.select_symbols(
+        statistics,
+        reliability=reliability,
+    ) == ["OPEN", "SNAP"]
+
+
+def test_reliability_falls_back_when_history_is_insufficient():
+    from trading_bot.scanner import OpeningReliability
+
+    scanner = StockScanner(
+        current_symbols=["BBAI", "OPEN"],
+    )
+
+    statistics = [
+        make_stats("SNAP"),
+    ]
+
+    reliability = [
+        OpeningReliability(
+            symbol="BBAI",
+            usable_days=2,
+            total_bars=20,
+            expected_bars=30,
+        ),
+    ]
+
+    assert scanner.select_symbols(
+        statistics,
+        reliability=reliability,
+    ) == [
+        "BBAI",
+        "OPEN",
+        "SNAP",
+    ]

@@ -71,11 +71,44 @@ class TradingBot:
                 )
             )
 
+            reliability = None
+
+            try:
+                reliability = (
+                    self.alpaca.get_opening_reliability(
+                        symbols_csv=",".join(
+                            dict.fromkeys(
+                                TICKERS
+                                + CANDIDATE_TICKERS
+                            )
+                        ),
+                        date_str=date_str,
+                        feed=data_feed,
+                    )
+                )
+            except Exception as reliability_error:
+                print(
+                    "Opening reliability check failed. "
+                    "Continuing without reliability filtering. "
+                    f"Reason: {reliability_error}"
+                )
+
             selected_symbols = (
                 self.scanner.select_symbols(
-                    statistics
+                    statistics,
+                    reliability=reliability,
                 )
             )
+
+            if reliability is not None:
+                for record in reliability:
+                    print(
+                        f"{record.symbol}: "
+                        f"{data_feed.upper()} opening reliability "
+                        f"{record.completeness:.1%} across "
+                        f"{record.usable_days} day(s)."
+                    )
+
             self.scanner_statistics = statistics
 
         except Exception as error:

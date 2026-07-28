@@ -11,7 +11,7 @@ from .config import (
     BASE_URL,
     MARKET_DATA_FEED,
 )
-from .scanner import StockStats
+from .scanner import OpeningReliability, StockStats
 from .utils import call_with_retries
 
 
@@ -507,6 +507,104 @@ class AlpacaClient:
 
         for bars in results.values():
             bars.sort(key=lambda bar: str(bar["t"]))
+        return results
+
+    def get_opening_reliability(
+            self,
+            symbols_csv: str,
+            date_str: str,
+            lookback_days: int = 10,
+            feed: str = MARKET_DATA_FEED,
+    ) -> list[OpeningReliability]:
+        """
+        Measure genuine 09:30-09:44 opening-bar completeness
+        across recent trading sessions.
+        """
+        feed = self._validate_feed(feed)
+        symbols = self._symbols_from_csv(symbols_csv)
+
+        end_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date() - timedelta(days=1)
+
+        start_date = end_date - timedelta(
+            days=max(lookback_days * 3, 21)
+        )
+
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        start_dt = datetime.combine(
+            start_date,
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        end_dt = datetime.combine(
+            end_date,
+            time(hour=9, minute=44, second=59),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        bars_by_symbol = self.get_historical_1min_bars(
+            symbols_csv=symbols_csv,
+            start_iso=start_dt.strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            end_iso=end_dt.strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            feed=feed,
+        )
+
+        results: list[OpeningReliability] = []
+
+        for symbol in symbols:
+            bars_by_day: dict[str, set[str]] = {}
+
+            for bar in bars_by_symbol.get(symbol, []):
+                raw_timestamp = str(bar.get("t", ""))
+
+                try:
+                    timestamp = datetime.fromisoformat(
+                        raw_timestamp.replace("Z", "+00:00")
+                    ).astimezone(eastern)
+                except ValueError:
+                    continue
+
+                if not (
+                    timestamp.hour == 9
+                    and 30 <= timestamp.minute <= 44
+                ):
+                    continue
+
+                day = timestamp.date().isoformat()
+                bars_by_day.setdefault(day, set()).add(
+                    timestamp.strftime("%H:%M")
+                )
+
+            recent_days = sorted(
+                bars_by_day,
+                reverse=True,
+            )[:lookback_days]
+
+            total_bars = sum(
+                min(len(bars_by_day[day]), 15)
+                for day in recent_days
+            )
+
+            usable_days = len(recent_days)
+
+            results.append(
+                OpeningReliability(
+                    symbol=symbol,
+                    usable_days=usable_days,
+                    total_bars=total_bars,
+                    expected_bars=usable_days * 15,
+                )
+            )
+
         return results
 
     def get_scanner_statistics(

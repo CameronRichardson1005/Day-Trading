@@ -20,6 +20,20 @@ class StockStats:
 
 
 @dataclass(frozen=True)
+class OpeningReliability:
+    symbol: str
+    usable_days: int
+    total_bars: int
+    expected_bars: int
+
+    @property
+    def completeness(self) -> float:
+        if self.expected_bars <= 0:
+            return 0.0
+        return self.total_bars / self.expected_bars
+
+
+@dataclass(frozen=True)
 class ScannerRules:
     minimum_valid_bars: int = 20
     minimum_price: float = 2.0
@@ -28,6 +42,8 @@ class ScannerRules:
     minimum_average_range: float = 0.20
     minimum_average_range_pct: float = 4.0
     candidate_limit: int = 3
+    minimum_reliability_days: int = 5
+    minimum_opening_completeness: float = 0.90
 
 
 class StockScanner:
@@ -100,15 +116,63 @@ class StockScanner:
             :self.rules.candidate_limit
         ]
 
+    def reliable_symbol_set(
+            self,
+            reliability: Iterable[OpeningReliability] | None,
+    ) -> set[str] | None:
+        if reliability is None:
+            return None
+
+        records = list(reliability)
+
+        usable_records = [
+            record
+            for record in records
+            if (
+                record.usable_days
+                >= self.rules.minimum_reliability_days
+            )
+        ]
+
+        if not usable_records:
+            return None
+
+        return {
+            record.symbol
+            for record in usable_records
+            if (
+                record.completeness
+                >= self.rules.minimum_opening_completeness
+            )
+        }
+
     def select_symbols(
             self,
             statistics: Iterable[StockStats],
+            reliability: Iterable[OpeningReliability] | None = None,
     ) -> list[str]:
         selected_candidates = self.select_candidates(
             statistics
         )
 
-        return self.current_symbols + [
+        selected = self.current_symbols + [
             stats.symbol
             for stats in selected_candidates
         ]
+
+        reliable_symbols = self.reliable_symbol_set(
+            reliability
+        )
+
+        if reliable_symbols is None:
+            return selected
+
+        filtered = [
+            symbol
+            for symbol in selected
+            if symbol in reliable_symbols
+        ]
+
+        # Fail safe: never return an empty universe because
+        # reliability history may be temporarily incomplete.
+        return filtered or selected
