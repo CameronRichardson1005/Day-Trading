@@ -30,6 +30,7 @@ def test_bot_refreshes_symbols_from_scanner_results():
                 self,
                 symbols_csv,
                 date_str,
+                feed,
         ):
             self.requested_symbols = symbols_csv
 

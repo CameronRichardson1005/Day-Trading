@@ -41,6 +41,7 @@ def test_complete_invest_includes_levels():
     )
 
     assert payload["status"] == "COMPLETE"
+    assert payload["dataFeed"] == "SIP"
     assert payload["symbols"][0]["signal"] == "INVEST"
     assert payload["symbols"][0]["levels"] == {
         "buy": 9.0,
@@ -177,6 +178,7 @@ def test_publish_uses_read_only_endpoint_contract():
         ),
     }
     assert calls[0][1]["timeout"] == (5, 15)
+    assert calls[0][1]["json"]["dataFeed"] == "SIP"
 
 
 def test_complete_invest_includes_outcome():

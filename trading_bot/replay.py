@@ -1,12 +1,13 @@
 import time as time_module
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .models import Stock
+from .config import MARKET_DATA_FEED
 from .strategy import ManipulationStrategy
 from .tracker import MinuteTracker
 
@@ -15,6 +16,19 @@ from .tracker import MinuteTracker
 class ReplaySummary:
     processed_bars: dict[str, int]
     missing_bars: dict[str, int]
+    data_feed: str = MARKET_DATA_FEED
+    missing_timestamps: dict[str, list[str]] = field(
+        default_factory=dict
+    )
+    missing_bar_classification: dict[str, str] = field(
+        default_factory=dict
+    )
+    atr_diagnostics: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    market_regimes: dict[str, str] = field(
+        default_factory=dict
+    )
 
 
 class HistoricalReplay:
@@ -148,10 +162,27 @@ class HistoricalReplay:
         exit_time: str,
         exit_price: float,
         detail: str,
+        slippage_bps: float = 0.0,
+        commission_per_share: float = 0.0,
     ) -> dict[str, Any]:
-        pnl_per_share = exit_price - entry_price
+        slippage_rate = slippage_bps / 10_000.0
+        effective_entry = entry_price * (
+            1.0 + slippage_rate
+        )
+        effective_exit = exit_price * (
+            1.0 - slippage_rate
+        )
+        costs_per_share = (
+            commission_per_share * 2.0
+        )
+        gross_pnl = exit_price - entry_price
+        pnl_per_share = (
+            effective_exit
+            - effective_entry
+            - costs_per_share
+        )
         return_pct = (
-            pnl_per_share / entry_price
+            pnl_per_share / effective_entry
         ) * 100.0
 
         return {
@@ -160,6 +191,26 @@ class HistoricalReplay:
             "exitTime": exit_time,
             "entryPrice": float(entry_price),
             "exitPrice": float(exit_price),
+            "effectiveEntryPrice": round(
+                effective_entry,
+                6,
+            ),
+            "effectiveExitPrice": round(
+                effective_exit,
+                6,
+            ),
+            "grossPnlPerShare": round(
+                gross_pnl,
+                6,
+            ),
+            "costsPerShare": round(
+                (
+                    effective_entry - entry_price
+                    + exit_price - effective_exit
+                    + costs_per_share
+                ),
+                6,
+            ),
             "pnlPerShare": round(
                 pnl_per_share,
                 6,
@@ -174,6 +225,8 @@ class HistoricalReplay:
     def calculate_outcomes(
         self,
         bars_by_symbol: dict[str, list[dict]],
+        slippage_bps: float = 0.0,
+        commission_per_share: float = 0.0,
     ) -> None:
         """
         Calculate hypothetical post-09:45 results.
@@ -181,6 +234,15 @@ class HistoricalReplay:
         This performs historical analysis only and cannot
         create, modify, or cancel an order.
         """
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+        if commission_per_share < 0:
+            raise ValueError(
+                "Commission cannot be negative."
+            )
+
         for symbol, stock in self.stocks.items():
             stock.outcome = None
 
@@ -190,7 +252,7 @@ class HistoricalReplay:
             levels = (
                 stock.limit_buy,
                 stock.limit_sell,
-                stock.stop_loss,
+                stock.trading_stop_loss,
             )
 
             if not all(
@@ -201,7 +263,9 @@ class HistoricalReplay:
 
             entry_price = float(stock.limit_buy)
             target_price = float(stock.limit_sell)
-            stop_price = float(stock.stop_loss)
+            stop_price = float(
+                stock.trading_stop_loss
+            )
 
             entered = False
             entry_time = None
@@ -240,6 +304,16 @@ class HistoricalReplay:
                         exit_time=bar_time,
                         exit_price=stop_price,
                         detail=detail,
+                        slippage_bps=slippage_bps,
+                        commission_per_share=(
+                            commission_per_share
+                        ),
+                    )
+                    stock.outcome["exitReason"] = (
+                        "TRADING_STOP_LOSS"
+                    )
+                    stock.outcome["stopPriceUsed"] = (
+                        stop_price
                     )
                     break
 
@@ -251,6 +325,14 @@ class HistoricalReplay:
                         exit_time=bar_time,
                         exit_price=target_price,
                         detail="Profit target reached first.",
+                        slippage_bps=slippage_bps,
+                        commission_per_share=(
+                            commission_per_share
+                        ),
+                    )
+                    stock.outcome["exitReason"] = "TARGET"
+                    stock.outcome["stopPriceUsed"] = (
+                        stop_price
                     )
                     break
 
@@ -266,16 +348,34 @@ class HistoricalReplay:
                     ),
                 }
             else:
-                stock.outcome = {
-                    "status": "STILL OPEN",
-                    "entryTime": entry_time,
-                    "entryPrice": entry_price,
-                    "detail": (
-                        "The trade entered, but neither target "
-                        "nor stop was reached before the "
-                        "session ended."
+                symbol_bars = bars_by_symbol.get(
+                    symbol,
+                    [],
+                )
+                final_bar = symbol_bars[-1]
+                exit_price = float(final_bar["c"])
+                stock.outcome = self._closed_outcome(
+                    status="WIN",
+                    entry_time=entry_time,
+                    entry_price=entry_price,
+                    exit_time=self._outcome_time(final_bar),
+                    exit_price=exit_price,
+                    detail=(
+                        "Neither target nor stop was reached; "
+                        "position marked closed at the final "
+                        "available session price."
                     ),
-                }
+                    slippage_bps=slippage_bps,
+                    commission_per_share=(
+                        commission_per_share
+                    ),
+                )
+                stock.outcome["status"] = (
+                    "WIN"
+                    if stock.outcome["returnPct"] >= 0
+                    else "LOSS"
+                )
+                stock.outcome["exitReason"] = "EOD"
 
     def run(
         self,
@@ -283,6 +383,7 @@ class HistoricalReplay:
         window_start: datetime,
         bars_by_symbol: dict[str, list[dict]],
         atrs: dict[str, float | None],
+        data_feed: str = MARKET_DATA_FEED,
     ) -> ReplaySummary:
         if window_start.tzinfo is None:
             raise ValueError(
@@ -334,6 +435,10 @@ class HistoricalReplay:
             symbol: 0
             for symbol in self.stocks
         }
+        missing_timestamps = {
+            symbol: []
+            for symbol in self.stocks
+        }
 
         print()
         print(
@@ -364,6 +469,11 @@ class HistoricalReplay:
 
                 if bar is None:
                     missing_bars[symbol] += 1
+                    missing_timestamps[symbol].append(
+                        current_minute
+                        .astimezone(eastern)
+                        .strftime("%Y-%m-%d %H:%M ET")
+                    )
                     continue
 
                 MinuteTracker.process_bar(
@@ -448,4 +558,15 @@ class HistoricalReplay:
         return ReplaySummary(
             processed_bars=processed_bars,
             missing_bars=missing_bars,
+            data_feed=data_feed,
+            missing_timestamps=missing_timestamps,
+            missing_bar_classification={
+                symbol: (
+                    f"NO_VALID_{data_feed.upper()}_BAR_RETURNED"
+                    if timestamps
+                    else "COMPLETE"
+                )
+                for symbol, timestamps
+                in missing_timestamps.items()
+            },
         )

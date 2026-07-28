@@ -17,5 +17,12 @@ venv/
 # Logs
 logs/
 
+# Generated backtest reports
+reports/*.csv
+
 .env.save
 .env.save
+
+# Generated backtest output and local archives
+reports/
+trading-bot-source.zip

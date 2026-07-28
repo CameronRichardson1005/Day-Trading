@@ -57,6 +57,7 @@ def test_scanner_statistics_are_calculated():
     assert captured["params"]["symbols"] == "SNAP"
     assert captured["params"]["timeframe"] == "1Day"
     assert captured["params"]["sort"] == "desc"
+    assert captured["params"]["feed"] == "sip"
     assert captured["params"]["end"].startswith(
         "2026-07-26"
     )

@@ -16,13 +16,18 @@ def make_bar():
 
 def test_market_data_uses_requested_symbols():
     client = object.__new__(AlpacaClient)
+    captured = {}
 
-    client._request = lambda params, label: {
-        "bars": {
-            "AAA": [make_bar()],
-            "BBB": [make_bar()],
-        },
-    }
+    def fake_request(params, label):
+        captured["params"] = params
+        return {
+            "bars": {
+                "AAA": [make_bar()],
+                "BBB": [make_bar()],
+            },
+        }
+
+    client._request = fake_request
 
     results = client.get_1min_bars(
         symbols_csv="AAA, BBB,AAA",
@@ -33,6 +38,7 @@ def test_market_data_uses_requested_symbols():
     assert list(results) == ["AAA", "BBB"]
     assert results["AAA"] is not None
     assert results["BBB"] is not None
+    assert captured["params"]["feed"] == "sip"
 
 
 @pytest.mark.parametrize(

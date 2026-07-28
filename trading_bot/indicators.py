@@ -37,13 +37,17 @@ def calculate_wilder_atr(
     """
     Calculate Wilder's ATR.
 
-    Alpaca currently returns the daily bars newest-first, so this
-    function reverses them into chronological order.
+    Input order is normalised by timestamp so paginated historical
+    responses remain correct whether the API returns ascending or
+    descending pages.
     """
     if len(bars) < period + 1:
         return None
 
-    chronological_bars = list(reversed(bars))
+    chronological_bars = sorted(
+        bars,
+        key=lambda bar: str(bar["t"]),
+    )
 
     true_ranges = calculate_true_ranges(
         chronological_bars

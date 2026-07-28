@@ -1,10 +1,23 @@
 import time as time_module
 
+from contextlib import redirect_stdout
 from datetime import datetime, time, timedelta
+from io import StringIO
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .alpaca_client import AlpacaClient
-from .config import CANDIDATE_TICKERS, TICKERS
+from .backtest import (
+    BacktestReport,
+    ReplaySession,
+    market_regimes_by_date,
+    weekday_dates,
+)
+from .config import (
+    CANDIDATE_TICKERS,
+    MARKET_DATA_FEED,
+    TICKERS,
+)
 from .dashboard_exporter import DashboardExporter
 from .models import Stock
 from .replay import HistoricalReplay
@@ -37,6 +50,7 @@ class TradingBot:
     def refresh_symbols_for_date(
             self,
             date_str: str,
+            data_feed: str = MARKET_DATA_FEED,
     ) -> list[str]:
         self.scanner_statistics = None
 
@@ -51,6 +65,7 @@ class TradingBot:
                         CANDIDATE_TICKERS
                     ),
                     date_str=date_str,
+                    feed=data_feed,
                 )
             )
 
@@ -335,7 +350,7 @@ class TradingBot:
 
         market_end_eastern = datetime.combine(
             today_eastern,
-            time(hour=9, minute=45),
+            time(hour=9, minute=44),
             tzinfo=eastern,
         )
 
@@ -380,7 +395,7 @@ class TradingBot:
             "Tracking window:",
             market_open_eastern.strftime("%H:%M"),
             "to",
-            market_end_eastern.strftime("%H:%M"),
+            "09:45",
             "New York time",
         )
 
@@ -409,6 +424,7 @@ class TradingBot:
             date_str: str,
             source: str,
             processed_bars: dict[str, int],
+            data_feed: str = MARKET_DATA_FEED,
     ) -> None:
         try:
             result = self.dashboard.publish(
@@ -416,6 +432,7 @@ class TradingBot:
                 source=source,
                 stocks=self.stocks,
                 processed_bars=processed_bars,
+                data_feed=data_feed,
             )
         except Exception as error:
             print(
@@ -441,7 +458,16 @@ class TradingBot:
             self,
             date_str: str,
             speed: float = 60.0,
-    ) -> None:
+        publish_dashboard: bool = True,
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 0.0,
+        commission_per_share: float = 0.0,
+    ) -> ReplaySession:
+        data_feed = data_feed.strip().lower()
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Market-data feed must be 'iex' or 'sip'."
+            )
         try:
             trading_date = datetime.strptime(
                 date_str,
@@ -483,12 +509,16 @@ class TradingBot:
         print("===================================")
         print(f"Trading date: {date_str}")
         print(f"Replay speed: {speed:g}x")
+        print(f"Market-data feed: {data_feed.upper()}")
         print(
             "READ-ONLY MODE: Google Sheets, Orders, "
             "and trading are disabled."
         )
 
-        self.refresh_symbols_for_date(date_str)
+        self.refresh_symbols_for_date(
+            date_str,
+            data_feed=data_feed,
+        )
 
         bars_by_symbol = (
             self.alpaca.get_historical_1min_bars(
@@ -499,12 +529,14 @@ class TradingBot:
                 end_iso=window_end.strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 ),
+                feed=data_feed,
             )
         )
 
         atrs = self.alpaca.get_previous_day_ranges_all(
             symbols_csv=self.symbols_csv,
             date_str=date_str,
+            feed=data_feed,
         )
 
         replay = HistoricalReplay(
@@ -518,6 +550,12 @@ class TradingBot:
             window_start=window_start,
             bars_by_symbol=bars_by_symbol,
             atrs=atrs,
+            data_feed=data_feed,
+        )
+        summary.atr_diagnostics = getattr(
+            self.alpaca,
+            "last_atr_diagnostics",
+            {},
         )
 
         outcome_start = datetime.combine(
@@ -541,11 +579,14 @@ class TradingBot:
                 end_iso=outcome_end.strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 ),
+                feed=data_feed,
             )
         )
 
         replay.calculate_outcomes(
-            bars_by_symbol=outcome_bars
+            bars_by_symbol=outcome_bars,
+            slippage_bps=slippage_bps,
+            commission_per_share=commission_per_share,
         )
 
         print()
@@ -596,11 +637,192 @@ class TradingBot:
             "No spreadsheets or orders were created."
         )
 
-        self._publish_dashboard_session(
-            date_str=date_str,
-            source="REPLAY",
-            processed_bars=summary.processed_bars,
+        session = ReplaySession(
+            date=date_str,
+            stocks={
+                symbol: stock
+                for symbol, stock in self.stocks.items()
+            },
+            summary=summary,
         )
+
+        if publish_dashboard:
+            self._publish_dashboard_session(
+                date_str=date_str,
+                source="REPLAY",
+                processed_bars=summary.processed_bars,
+                data_feed=data_feed,
+            )
+
+        return session
+
+    def run_backtest(
+            self,
+            start_date: str,
+            end_date: str,
+        output_directory: str | Path = "reports",
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 0.0,
+        commission_per_share: float = 0.0,
+        train_fraction: float = 0.70,
+    ) -> BacktestReport:
+        data_feed = data_feed.strip().lower()
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Market-data feed must be 'iex' or 'sip'."
+            )
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+        if commission_per_share < 0:
+            raise ValueError(
+                "Commission cannot be negative."
+            )
+        if not 0.1 <= train_fraction <= 0.9:
+            raise ValueError(
+                "Train fraction must be between 0.1 and 0.9."
+            )
+        try:
+            start = datetime.strptime(
+                start_date,
+                "%Y-%m-%d",
+            ).date()
+            end = datetime.strptime(
+                end_date,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Backtest dates must use YYYY-MM-DD format."
+            ) from error
+
+        dates = weekday_dates(start, end)
+        if not dates:
+            raise ValueError(
+                "Backtest range contains no weekdays."
+            )
+
+        report = BacktestReport(
+            start_date=start_date,
+            end_date=end_date,
+            data_feed=data_feed,
+            slippage_bps=slippage_bps,
+            commission_per_share=commission_per_share,
+            train_fraction=train_fraction,
+        )
+
+        benchmark_start = (
+            start - timedelta(days=60)
+        ).isoformat()
+        try:
+            benchmark_bars = (
+                self.alpaca.get_historical_daily_bars(
+                    symbols_csv="SPY,QQQ",
+                    start_date=benchmark_start,
+                    end_date=end_date,
+                    feed=data_feed,
+                )
+            )
+            regimes = market_regimes_by_date(
+                benchmark_bars,
+                dates,
+            )
+        except Exception as error:
+            print(
+                "Market-regime data unavailable; "
+                f"continuing without it: {error}"
+            )
+            regimes = {}
+
+        print()
+        print("===================================")
+        print(" Multi-Day Historical Backtest")
+        print("===================================")
+        print(
+            f"Date range: {start_date} to {end_date}"
+        )
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            "Execution assumptions: "
+            f"{slippage_bps:.2f} bps slippage per side, "
+            f"${commission_per_share:.4f} commission "
+            "per share per side"
+        )
+        print(
+            "READ-ONLY MODE: Google Sheets, dashboard "
+            "uploads, Orders, and trading are disabled."
+        )
+
+        for trading_date in dates:
+            date_str = trading_date.isoformat()
+
+            try:
+                with redirect_stdout(StringIO()):
+                    session = self.run_replay(
+                        date_str=date_str,
+                        speed=0,
+                        publish_dashboard=False,
+                        data_feed=data_feed,
+                        slippage_bps=slippage_bps,
+                        commission_per_share=(
+                            commission_per_share
+                        ),
+                    )
+            except Exception as error:
+                report.add_failure(date_str, error)
+                print(
+                    f"{date_str}: FAILED - {error}"
+                )
+                continue
+
+            session.summary.market_regimes = regimes.get(
+                date_str,
+                {},
+            )
+            report.add_session(session)
+            metrics = report.metrics_for([
+                record
+                for record in report.records
+                if record.date == date_str
+            ])
+
+            print(
+                f"{date_str}: "
+                f"{metrics.invest_signals} signals, "
+                f"{metrics.wins} wins, "
+                f"{metrics.losses} losses, "
+                f"{metrics.unresolved} unresolved, "
+                f"{metrics.no_entry} no entry, "
+                f"{metrics.incomplete_ticker_days} "
+                "incomplete ticker-days"
+            )
+
+        report.print_summary()
+        (
+            detail_path,
+            summary_path,
+            missing_path,
+            robustness_path,
+            atr_path,
+            split_path,
+        ) = report.write_csv(output_directory)
+
+        print()
+        print(f"Detailed results: {detail_path}")
+        print(f"Summary results: {summary_path}")
+        print(
+            f"Missing-bar diagnostics: {missing_path}"
+        )
+        print(
+            f"Filter comparisons: {robustness_path}"
+        )
+        print(f"ATR diagnostics: {atr_path}")
+        print(
+            f"Chronological train/test: {split_path}"
+        )
+
+        return report
 
     def run_strategy_test(self) -> None:
         test_date = "2026-07-23"

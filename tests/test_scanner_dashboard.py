@@ -1,6 +1,7 @@
 from trading_bot.scanner import StockScanner
 from trading_bot.scanner import StockStats
 from trading_bot.sheets_client import SheetsClient
+from trading_bot.models import Stock
 
 
 def make_stats(
@@ -150,4 +151,51 @@ def test_scanner_dashboard_reconciles_ranked_rows():
             "PRICE ABOVE MAXIMUM; "
             "RANGE % BELOW MINIMUM"
         ),
+    ]
+
+
+def test_orders_sheet_uses_original_trading_stop_loss():
+    invest = Stock(symbol="OPEN")
+    invest.signal = "INVEST"
+    invest.limit_buy = 4.25
+    invest.limit_sell = 4.50
+    invest.stop_loss = 4.10
+    invest.trading_stop_loss = 4.05
+
+    skipped = Stock(symbol="SOUN")
+    skipped.signal = "NO INVEST"
+
+    captured = {}
+    worksheet = object()
+    sheets = object.__new__(SheetsClient)
+    sheets.get_or_create_worksheet = (
+        lambda title, rows, cols: worksheet
+    )
+    sheets._replace_date_rows = (
+        lambda **kwargs: captured.update(kwargs)
+    )
+
+    sheets.write_orders(
+        date_str="2026-07-27",
+        stocks={
+            "OPEN": invest,
+            "SOUN": skipped,
+        },
+    )
+
+    assert captured["columns"] == [
+        "Date",
+        "Symbol",
+        "Limit Buy",
+        "Limit Sell",
+        "Trading Stop Loss",
+    ]
+    assert captured["replacement_rows"] == [
+        [
+            "2026-07-27",
+            "OPEN",
+            4.25,
+            4.5,
+            4.05,
+        ]
     ]

@@ -5,12 +5,19 @@ from zoneinfo import ZoneInfo
 from typing import Any
 from .indicators import calculate_wilder_atr
 
-from .config import API_KEY, API_SECRET, BASE_URL
+from .config import (
+    API_KEY,
+    API_SECRET,
+    BASE_URL,
+    MARKET_DATA_FEED,
+)
 from .scanner import StockStats
 from .utils import call_with_retries
 
 
 class AlpacaClient:
+    STOCK_DATA_FEEDS = {"iex", "sip"}
+
     def __init__(self) -> None:
         self.base_url = BASE_URL
 
@@ -53,6 +60,17 @@ class AlpacaClient:
             raise RuntimeError(f"{label} failed: {message}")
 
         return data
+
+    @staticmethod
+    def _validate_feed(feed: str) -> str:
+        normalised = feed.strip().lower()
+
+        if normalised not in AlpacaClient.STOCK_DATA_FEEDS:
+            raise ValueError(
+                "Stock data feed must be 'iex' or 'sip'."
+            )
+
+        return normalised
 
     @staticmethod
     def _symbols_from_csv(
@@ -132,14 +150,16 @@ class AlpacaClient:
         symbols_csv: str,
         start_iso: str,
         end_iso: str,
+        feed: str = MARKET_DATA_FEED,
     ) -> dict[str, dict | None]:
+        feed = self._validate_feed(feed)
         params = {
             "symbols": symbols_csv,
             "timeframe": "1Min",
             "start": start_iso,
             "end": end_iso,
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
             "limit": 1000,
             "sort": "desc",
@@ -166,12 +186,14 @@ class AlpacaClient:
         symbols_csv: str,
         start_iso: str,
         end_iso: str,
+        feed: str = MARKET_DATA_FEED,
     ) -> dict[str, list[dict]]:
         """
         Fetch all valid historical one-minute bars in
         chronological order, following Alpaca pagination.
         """
         symbols = self._symbols_from_csv(symbols_csv)
+        feed = self._validate_feed(feed)
 
         base_params = {
             "symbols": symbols_csv,
@@ -179,10 +201,10 @@ class AlpacaClient:
             "start": start_iso,
             "end": end_iso,
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
             "limit": 1000,
-            "sort": "asc",
+            "sort": "desc",
         }
 
         results = {
@@ -242,7 +264,9 @@ class AlpacaClient:
             self,
             symbols_csv: str,
             date_str: str,
+            feed: str = MARKET_DATA_FEED,
     ) -> dict[str, dict | None]:
+        feed = self._validate_feed(feed)
         eastern = ZoneInfo("America/New_York")
         utc = ZoneInfo("UTC")
 
@@ -273,7 +297,7 @@ class AlpacaClient:
                 "%Y-%m-%dT%H:%M:%SZ"
             ),
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
             "limit": 1000,
             "sort": "desc",
@@ -299,11 +323,14 @@ class AlpacaClient:
         self,
         symbols_csv: str,
         date_str: str,
+        feed: str = MARKET_DATA_FEED,
     ) -> dict[str, float | None]:
         """
         Request daily bars for all symbols and calculate
         Wilder's 14-period ATR for each symbol.
         """
+        feed = self._validate_feed(feed)
+
         end_date = datetime.strptime(
             date_str,
             "%Y-%m-%d",
@@ -311,27 +338,55 @@ class AlpacaClient:
 
         start_date = end_date - timedelta(days=180)
 
-        params = {
+        base_params = {
             "symbols": symbols_csv,
             "timeframe": "1Day",
             "start": start_date.strftime("%Y-%m-%dT00:00:00Z"),
             "end": end_date.strftime("%Y-%m-%dT23:59:59Z"),
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
-            "limit": 1000,
-            "sort": "desc",
+            "limit": 10_000,
+            "sort": "asc",
         }
 
-        data = self._request(
-            params=params,
-            label="ATR daily bars fetch",
-        )
+        symbols = self._symbols_from_csv(symbols_csv)
+        bars_by_symbol = {
+            symbol: []
+            for symbol in symbols
+        }
+        page_token = None
 
-        bars_by_symbol = data.get("bars", {})
+        while True:
+            params = dict(base_params)
+            if page_token:
+                params["page_token"] = page_token
+
+            data = self._request(
+                params=params,
+                label="ATR daily bars fetch",
+            )
+            page_bars = data.get("bars", {})
+            if not isinstance(page_bars, dict):
+                raise RuntimeError(
+                    "Malformed ATR daily bars response."
+                )
+
+            for symbol in symbols:
+                raw_bars = page_bars.get(symbol, [])
+                if isinstance(raw_bars, list):
+                    bars_by_symbol[symbol].extend(
+                        raw_bars
+                    )
+
+            page_token = data.get("next_page_token")
+            if not page_token:
+                break
+
         results: dict[str, float | None] = {}
+        self.last_atr_diagnostics = {}
 
-        for symbol in self._symbols_from_csv(symbols_csv):
+        for symbol in symbols:
             raw_bars = bars_by_symbol.get(symbol, [])
 
             valid_bars = [
@@ -341,6 +396,21 @@ class AlpacaClient:
             ]
 
             if len(valid_bars) < 15:
+                self.last_atr_diagnostics[symbol] = {
+                    "status": "INSUFFICIENT_HISTORY",
+                    "valid_daily_bars": len(valid_bars),
+                    "required_daily_bars": 15,
+                    "first_bar": (
+                        str(valid_bars[0]["t"])
+                        if valid_bars
+                        else ""
+                    ),
+                    "last_bar": (
+                        str(valid_bars[-1]["t"])
+                        if valid_bars
+                        else ""
+                    ),
+                }
                 print(
                     f"{symbol}: insufficient valid daily bars "
                     f"for ATR ({len(valid_bars)} returned)"
@@ -353,10 +423,90 @@ class AlpacaClient:
                     bars=valid_bars,
                     period=14,
                 )
+                self.last_atr_diagnostics[symbol] = {
+                    "status": "AVAILABLE",
+                    "valid_daily_bars": len(valid_bars),
+                    "required_daily_bars": 15,
+                    "first_bar": str(
+                        valid_bars[0]["t"]
+                    ),
+                    "last_bar": str(
+                        valid_bars[-1]["t"]
+                    ),
+                }
             except Exception as error:
                 print(f"{symbol}: ATR calculation failed: {error}")
                 results[symbol] = None
+                self.last_atr_diagnostics[symbol] = {
+                    "status": "CALCULATION_FAILED",
+                    "valid_daily_bars": len(valid_bars),
+                    "required_daily_bars": 15,
+                    "first_bar": str(
+                        valid_bars[0]["t"]
+                    ),
+                    "last_bar": str(
+                        valid_bars[-1]["t"]
+                    ),
+                    "error": str(error),
+                }
 
+        return results
+
+    def get_historical_daily_bars(
+            self,
+            symbols_csv: str,
+            start_date: str,
+            end_date: str,
+            feed: str = MARKET_DATA_FEED,
+    ) -> dict[str, list[dict]]:
+        symbols = self._symbols_from_csv(symbols_csv)
+        feed = self._validate_feed(feed)
+        base_params = {
+            "symbols": symbols_csv,
+            "timeframe": "1Day",
+            "start": f"{start_date}T00:00:00Z",
+            "end": f"{end_date}T23:59:59Z",
+            "adjustment": "raw",
+            "feed": feed,
+            "currency": "usd",
+            "limit": 10_000,
+            "sort": "asc",
+        }
+        results = {
+            symbol: []
+            for symbol in symbols
+        }
+        page_token = None
+
+        while True:
+            params = dict(base_params)
+            if page_token:
+                params["page_token"] = page_token
+            data = self._request(
+                params=params,
+                label="Benchmark daily bars fetch",
+            )
+            page_bars = data.get("bars", {})
+            if not isinstance(page_bars, dict):
+                raise RuntimeError(
+                    "Malformed benchmark daily bars response."
+                )
+
+            for symbol in symbols:
+                raw_bars = page_bars.get(symbol, [])
+                if isinstance(raw_bars, list):
+                    results[symbol].extend(
+                        bar
+                        for bar in raw_bars
+                        if self._is_valid_bar(bar)
+                    )
+
+            page_token = data.get("next_page_token")
+            if not page_token:
+                break
+
+        for bars in results.values():
+            bars.sort(key=lambda bar: str(bar["t"]))
         return results
 
     def get_scanner_statistics(
@@ -364,6 +514,7 @@ class AlpacaClient:
             symbols_csv: str,
             date_str: str,
             lookback_days: int = 30,
+            feed: str = MARKET_DATA_FEED,
     ) -> list[StockStats]:
         if lookback_days < 1:
             raise ValueError(
@@ -371,6 +522,7 @@ class AlpacaClient:
             )
 
         symbols = self._symbols_from_csv(symbols_csv)
+        feed = self._validate_feed(feed)
 
         end_date = datetime.strptime(
             date_str,
@@ -391,7 +543,7 @@ class AlpacaClient:
                 "%Y-%m-%dT23:59:59Z"
             ),
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
             "limit": 10000,
             "sort": "desc",
@@ -467,6 +619,7 @@ class AlpacaClient:
     def test_connection(
         self,
         symbols_csv: str,
+        feed: str = MARKET_DATA_FEED,
     ) -> dict[str, dict | None]:
         """
         Request recent daily bars to verify authentication
@@ -475,13 +628,15 @@ class AlpacaClient:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=7)
 
+        feed = self._validate_feed(feed)
+
         params = {
             "symbols": symbols_csv,
             "timeframe": "1Day",
             "start": start_time.strftime("%Y-%m-%dT00:00:00Z"),
             "end": end_time.strftime("%Y-%m-%dT23:59:59Z"),
             "adjustment": "raw",
-            "feed": "iex",
+            "feed": feed,
             "currency": "usd",
             "limit": 1000,
             "sort": "desc",

@@ -148,6 +148,154 @@ class MinuteTracker:
 
         return new_high, new_low, candle_color
 
+    @staticmethod
+    def _bar_timestamp(bar: dict[str, Any]) -> str:
+        """
+        Return the Alpaca timestamp used to deduplicate bars.
+        """
+        return str(bar.get("t", ""))
+
+    @staticmethod
+    def _reset_tracking_state(stock: Stock) -> None:
+        """
+        Reset minute-derived fields before a chronological rebuild.
+        """
+        stock.running_high = None
+        stock.running_low = None
+        stock.minute_bars = []
+        stock.green_minutes = 0
+        stock.red_minutes = 0
+        stock.new_highs = 0
+        stock.new_lows = 0
+
+    def reconcile_window(
+        self,
+        window_start: datetime,
+        window_end: datetime,
+        delay_seconds: int = 3,
+    ) -> dict[str, int]:
+        """
+        Re-fetch the complete opening window and rebuild each stock
+        chronologically from genuine IEX/SIP bars.
+
+        Existing valid bars are retained. Missing timestamps are filled
+        only when Alpaca supplies a real bar.
+        """
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+        start_iso = window_start.strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        end_iso = (
+            window_end + timedelta(seconds=59)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        try:
+            fetched = self.alpaca.get_historical_1min_bars(
+                symbols_csv=self.symbols_csv,
+                start_iso=start_iso,
+                end_iso=end_iso,
+            )
+        except Exception as error:
+            print(
+                f"Opening-window reconciliation failed: {error}",
+                flush=True,
+            )
+            return {
+                symbol: len(stock.minute_bars)
+                for symbol, stock in self.stocks.items()
+            }
+
+        expected_bars = (
+            int(
+                (window_end - window_start).total_seconds()
+                // 60
+            )
+            + 1
+        )
+
+        processed_counts: dict[str, int] = {}
+        sheet_updates: list[dict[str, Any]] = []
+
+        for symbol, stock in self.stocks.items():
+            unique_bars: dict[str, dict[str, Any]] = {}
+
+            for bar in stock.minute_bars:
+                timestamp = self._bar_timestamp(bar)
+                if timestamp:
+                    unique_bars[timestamp] = bar
+
+            for bar in fetched.get(symbol, []):
+                timestamp = self._bar_timestamp(bar)
+                if timestamp:
+                    unique_bars[timestamp] = bar
+
+            ordered_bars = [
+                unique_bars[timestamp]
+                for timestamp in sorted(unique_bars)
+            ]
+
+            self._reset_tracking_state(stock)
+
+            last_candle_color = ""
+
+            for bar in ordered_bars:
+                stock.minute_bars.append(bar)
+                _, _, last_candle_color = self.process_bar(
+                    stock=stock,
+                    bar=bar,
+                )
+
+            processed = len(ordered_bars)
+            processed_counts[symbol] = processed
+
+            if processed < expected_bars:
+                print(
+                    f"{symbol}: reconciliation finished with "
+                    f"{processed}/{expected_bars} real bars.",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"{symbol}: reconciliation completed with "
+                    f"{processed}/{expected_bars} bars.",
+                    flush=True,
+                )
+
+            if (
+                processed > 0
+                and symbol in self.symbol_rows
+                and stock.running_high is not None
+                and stock.running_low is not None
+            ):
+                sheet_updates.append(
+                    {
+                        "symbol": symbol,
+                        "row": self.symbol_rows[symbol],
+                        "running_high": round(
+                            stock.running_high,
+                            4,
+                        ),
+                        "running_low": round(
+                            stock.running_low,
+                            4,
+                        ),
+                        "time_label": "09:45",
+                        "candle_color": last_candle_color,
+                        "new_high": False,
+                        "new_low": False,
+                    }
+                )
+
+        if sheet_updates:
+            self.sheets.update_tracking_minute(
+                worksheet=self.worksheet,
+                updates=sheet_updates,
+            )
+
+        return processed_counts
+
     def track_window(
         self,
         date_str: str,
@@ -204,6 +352,17 @@ class MinuteTracker:
                     )
                     continue
 
+                timestamp = self._bar_timestamp(bar)
+
+                if (
+                    timestamp
+                    and all(
+                        self._bar_timestamp(existing) != timestamp
+                        for existing in stock.minute_bars
+                    )
+                ):
+                    stock.minute_bars.append(bar)
+
                 new_high, new_low, candle_color = self.process_bar(
                     stock=stock,
                     bar=bar,
@@ -242,6 +401,16 @@ class MinuteTracker:
             )
 
             current_minute += timedelta(minutes=1)
+
+        print(
+            "Reconciling the complete opening window...",
+            flush=True,
+        )
+
+        self.reconcile_window(
+            window_start=window_start,
+            window_end=window_end,
+        )
 
         print(
             "Finished real-time 1-minute tracking window.",

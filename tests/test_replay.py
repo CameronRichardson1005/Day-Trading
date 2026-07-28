@@ -111,6 +111,13 @@ def test_replay_uses_only_revealed_opening_bars():
         "FULL": 0,
         "MISS": 1,
     }
+    assert summary.missing_timestamps["MISS"] == [
+        "2026-07-23 09:44 ET"
+    ]
+    assert (
+        summary.missing_bar_classification["MISS"]
+        == "NO_VALID_SIP_BAR_RETURNED"
+    )
 
     assert len(strategy.calls) == 1
     assert strategy.calls[0][0] == "FULL"
@@ -214,6 +221,26 @@ def test_historical_fetch_returns_all_valid_bars_sorted():
     ]
 
 
+def test_historical_fetch_passes_sip_feed():
+    client = object.__new__(AlpacaClient)
+    captured = {}
+
+    def fake_request(*, params, label):
+        captured.update(params)
+        return {"bars": {"TEST": []}}
+
+    client._request = fake_request
+
+    client.get_historical_1min_bars(
+        symbols_csv="TEST",
+        start_iso="2026-07-23T13:30:00Z",
+        end_iso="2026-07-23T13:44:59Z",
+        feed="sip",
+    )
+
+    assert captured["feed"] == "sip"
+
+
 def test_main_dispatches_replay_mode(
         monkeypatch,
 ):
@@ -224,9 +251,10 @@ def test_main_dispatches_replay_mode(
                 self,
                 date_str,
                 speed,
+                data_feed,
         ):
             events.append(
-                (date_str, speed)
+                (date_str, speed, data_feed)
             )
 
     monkeypatch.setattr(
@@ -253,7 +281,7 @@ def test_main_dispatches_replay_mode(
 
     assert main_module.main() == 0
     assert events == [
-        ("2026-07-23", 60.0),
+        ("2026-07-23", 60.0, "sip"),
     ]
 
 
@@ -279,7 +307,8 @@ def outcome_stock(symbol: str) -> Stock:
     stock.signal = "INVEST"
     stock.limit_buy = 10.0
     stock.limit_sell = 11.0
-    stock.stop_loss = 9.0
+    stock.stop_loss = 9.05
+    stock.trading_stop_loss = 9.0
     return stock
 
 
@@ -354,7 +383,70 @@ def test_replay_calculates_all_outcome_states():
     )
 
     assert stocks["NONE"].outcome["status"] == "NO ENTRY"
-    assert stocks["OPEN"].outcome["status"] == "STILL OPEN"
+    assert stocks["OPEN"].outcome["status"] == "WIN"
+    assert stocks["OPEN"].outcome["exitReason"] == "EOD"
+    assert stocks["OPEN"].outcome["exitPrice"] == 10.3
+
+
+def test_replay_applies_slippage_and_commission():
+    stock = outcome_stock("WIN")
+    replay = HistoricalReplay(
+        stocks={"WIN": stock},
+        strategy=RecordingStrategy(),
+        speed=0,
+    )
+
+    replay.calculate_outcomes(
+        {
+            "WIN": [
+                outcome_bar(
+                    "2026-07-23T13:45:00Z",
+                    10.0,
+                    11.1,
+                    9.9,
+                    11.0,
+                ),
+            ],
+        },
+        slippage_bps=10.0,
+        commission_per_share=0.01,
+    )
+
+    assert stock.outcome["grossPnlPerShare"] == 1.0
+    assert stock.outcome["costsPerShare"] == 0.041
+    assert stock.outcome["pnlPerShare"] == 0.959
+
+
+def test_replay_uses_original_trading_stop_loss():
+    stock = outcome_stock("TEST")
+    replay = HistoricalReplay(
+        stocks={"TEST": stock},
+        strategy=RecordingStrategy(),
+        speed=0,
+    )
+
+    replay.calculate_outcomes({
+        "TEST": [
+            outcome_bar(
+                "2026-07-23T13:45:00Z",
+                10.0,
+                10.2,
+                9.02,
+                10.1,
+            ),
+            outcome_bar(
+                "2026-07-23T13:46:00Z",
+                10.1,
+                11.1,
+                10.0,
+                11.0,
+            ),
+        ],
+    })
+
+    assert stock.outcome["status"] == "WIN"
+    assert stock.outcome["stopPriceUsed"] == 9.0
+    assert stock.outcome["exitReason"] == "TARGET"
 
 
 def test_historical_fetch_follows_pagination():
@@ -423,3 +515,46 @@ def test_historical_fetch_follows_pagination():
         "2026-07-23T13:30:00Z",
         "2026-07-23T13:31:00Z",
     ]
+
+
+def test_atr_fetch_follows_pagination_and_records_diagnostics():
+    client = object.__new__(AlpacaClient)
+    requested_tokens = []
+    daily_bars = [
+        {
+            "o": 10.0,
+            "h": 11.0,
+            "l": 9.0,
+            "c": 10.0,
+            "t": f"2026-07-{day:02d}T04:00:00Z",
+        }
+        for day in range(1, 16)
+    ]
+
+    def fake_request(**kwargs):
+        token = kwargs["params"].get("page_token")
+        requested_tokens.append(token)
+        if token is None:
+            return {
+                "bars": {"BBAI": daily_bars[:8]},
+                "next_page_token": "NEXT",
+            }
+        return {
+            "bars": {"BBAI": daily_bars[8:]},
+            "next_page_token": None,
+        }
+
+    client._request = fake_request
+    result = client.get_previous_day_ranges_all(
+        symbols_csv="BBAI",
+        date_str="2026-07-24",
+        feed="sip",
+    )
+
+    assert requested_tokens == [None, "NEXT"]
+    assert result["BBAI"] is not None
+    assert (
+        client.last_atr_diagnostics["BBAI"]
+        ["valid_daily_bars"]
+        == 15
+    )
