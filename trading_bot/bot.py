@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
+from threading import Thread
 from zoneinfo import ZoneInfo
 
 from .alpaca_client import AlpacaClient
@@ -23,6 +24,7 @@ from .models import Stock
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
+from .stream_client import AlpacaStockStream
 from .strategy import ManipulationStrategy
 from .tracker import MinuteTracker
 
@@ -399,11 +401,83 @@ class TradingBot:
             "New York time",
         )
 
+        stream_result: dict[str, object] = {
+            "bars": {},
+            "error": None,
+        }
+
+        stream_stop_time = (
+            window_end
+            + timedelta(minutes=1)
+            + timedelta(seconds=5)
+        )
+
+        def collect_stream() -> None:
+            try:
+                stream = AlpacaStockStream(
+                    symbols=selected_symbols,
+                    feed=MARKET_DATA_FEED,
+                )
+                stream_result["bars"] = (
+                    stream.collect_until(
+                        stop_time=stream_stop_time,
+                    )
+                )
+            except Exception as error:
+                stream_result["error"] = error
+
+        stream_thread = Thread(
+            target=collect_stream,
+            name="alpaca-market-data-stream",
+            daemon=True,
+        )
+
+        print(
+            f"Starting {MARKET_DATA_FEED.upper()} "
+            "WebSocket collector..."
+        )
+        stream_thread.start()
+
         self.tracker.track_window(
             date_str=date_str,
             window_start=window_start,
             window_end=window_end,
         )
+
+        stream_thread.join(timeout=10)
+
+        stream_error = stream_result.get("error")
+        streamed_bars = stream_result.get("bars", {})
+
+        if stream_thread.is_alive():
+            print(
+                "WebSocket collector did not stop in time. "
+                "Continuing with reconciled REST bars."
+            )
+        elif stream_error is not None:
+            print(
+                "WebSocket collector failed. "
+                "Reconciled REST tracking was preserved."
+            )
+            print(f"WebSocket error: {stream_error}")
+        elif isinstance(streamed_bars, dict):
+            streamed_count = sum(
+                len(bars)
+                for bars in streamed_bars.values()
+                if isinstance(bars, list)
+            )
+
+            print(
+                f"Merging {streamed_count} WebSocket bar(s)..."
+            )
+
+            self.tracker.merge_stream_bars(
+                streamed_bars=streamed_bars,
+            )
+
+            print(
+                "WebSocket bars merged successfully."
+            )
 
         processed_bars = {
             symbol: (

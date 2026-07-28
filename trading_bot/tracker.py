@@ -168,6 +168,83 @@ class MinuteTracker:
         stock.new_highs = 0
         stock.new_lows = 0
 
+    def merge_stream_bars(
+        self,
+        streamed_bars: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, int]:
+        """
+        Merge WebSocket bars and updated bars into the REST results.
+
+        Bars are deduplicated by timestamp and rebuilt chronologically.
+        A later WebSocket updated bar replaces an earlier version.
+        """
+        processed_counts: dict[str, int] = {}
+        sheet_updates: list[dict[str, Any]] = []
+
+        for symbol, stock in self.stocks.items():
+            unique_bars: dict[str, dict[str, Any]] = {}
+
+            for bar in stock.minute_bars:
+                timestamp = self._bar_timestamp(bar)
+                if timestamp:
+                    unique_bars[timestamp] = bar
+
+            for bar in streamed_bars.get(symbol, []):
+                timestamp = self._bar_timestamp(bar)
+                if timestamp:
+                    unique_bars[timestamp] = bar
+
+            ordered_bars = [
+                unique_bars[timestamp]
+                for timestamp in sorted(unique_bars)
+            ]
+
+            self._reset_tracking_state(stock)
+
+            last_candle_color = ""
+
+            for bar in ordered_bars:
+                stock.minute_bars.append(bar)
+                _, _, last_candle_color = self.process_bar(
+                    stock=stock,
+                    bar=bar,
+                )
+
+            processed_counts[symbol] = len(ordered_bars)
+
+            if (
+                ordered_bars
+                and symbol in self.symbol_rows
+                and stock.running_high is not None
+                and stock.running_low is not None
+            ):
+                sheet_updates.append(
+                    {
+                        "symbol": symbol,
+                        "row": self.symbol_rows[symbol],
+                        "running_high": round(
+                            stock.running_high,
+                            4,
+                        ),
+                        "running_low": round(
+                            stock.running_low,
+                            4,
+                        ),
+                        "time_label": "09:45",
+                        "candle_color": last_candle_color,
+                        "new_high": False,
+                        "new_low": False,
+                    }
+                )
+
+        if sheet_updates:
+            self.sheets.update_tracking_minute(
+                worksheet=self.worksheet,
+                updates=sheet_updates,
+            )
+
+        return processed_counts
+
     def reconcile_window(
         self,
         window_start: datetime,
