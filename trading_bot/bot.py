@@ -44,6 +44,7 @@ class TradingBot:
             current_symbols=TICKERS,
         )
         self.scanner_statistics = None
+        self.symbol_reliability = None
 
         self.sheets = None
         self.tracker = None
@@ -55,6 +56,7 @@ class TradingBot:
             data_feed: str = MARKET_DATA_FEED,
     ) -> list[str]:
         self.scanner_statistics = None
+        self.symbol_reliability = None
 
         fallback_symbols = list(
             self.scanner.current_symbols
@@ -137,6 +139,56 @@ class TradingBot:
                     print(
                         f"{record.symbol}: {status}"
                     )
+
+            if reliability is not None:
+                selected_set = set(selected_symbols)
+                reliability_payload = []
+
+                for record in reliability:
+                    if (
+                        record.usable_days
+                        < self.scanner.rules.minimum_reliability_days
+                    ):
+                        status = (
+                            "FALLBACK_INSUFFICIENT_HISTORY"
+                        )
+                    elif record.symbol in selected_set:
+                        status = "SELECTED"
+                    elif (
+                        record.completeness
+                        < self.scanner.rules.minimum_opening_completeness
+                    ):
+                        status = (
+                            "EXCLUDED_LOW_RELIABILITY"
+                        )
+                    else:
+                        status = (
+                            "NOT_SELECTED_RANKING_LIMIT"
+                        )
+
+                    reliability_payload.append(
+                        {
+                            "symbol": record.symbol,
+                            "completeness": round(
+                                record.completeness,
+                                6,
+                            ),
+                            "usableDays": (
+                                record.usable_days
+                            ),
+                            "totalBars": (
+                                record.total_bars
+                            ),
+                            "expectedBars": (
+                                record.expected_bars
+                            ),
+                            "status": status,
+                        }
+                    )
+
+                self.symbol_reliability = (
+                    reliability_payload
+                )
 
             self.scanner_statistics = statistics
 
@@ -589,6 +641,9 @@ class TradingBot:
                 stocks=self.stocks,
                 processed_bars=processed_bars,
                 data_feed=data_feed,
+                symbol_reliability=(
+                    self.symbol_reliability
+                ),
             )
         except Exception as error:
             print(

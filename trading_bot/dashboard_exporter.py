@@ -257,6 +257,7 @@ class DashboardExporter:
             stocks: dict[str, Stock],
             processed_bars: dict[str, int],
             data_feed: str = MARKET_DATA_FEED,
+            symbol_reliability: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         source = source.upper()
         if source not in {"REPLAY", "LIVE"}:
@@ -295,7 +296,7 @@ class DashboardExporter:
             .replace("+00:00", "Z")
         )
 
-        return {
+        payload = {
             "id": f"{source.lower()}-{date_str}",
             "tradingDate": date_str,
             "source": source,
@@ -305,6 +306,13 @@ class DashboardExporter:
             "symbols": symbols,
         }
 
+        if symbol_reliability is not None:
+            payload["symbolReliability"] = (
+                symbol_reliability
+            )
+
+        return payload
+
     def publish(
             self,
             date_str: str,
@@ -312,6 +320,7 @@ class DashboardExporter:
             stocks: dict[str, Stock],
             processed_bars: dict[str, int],
             data_feed: str = MARKET_DATA_FEED,
+            symbol_reliability: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -327,6 +336,7 @@ class DashboardExporter:
             stocks=stocks,
             processed_bars=processed_bars,
             data_feed=data_feed,
+            symbol_reliability=symbol_reliability,
         )
 
         response = self.post_fn(
