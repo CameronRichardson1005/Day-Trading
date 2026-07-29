@@ -258,6 +258,7 @@ class DashboardExporter:
             processed_bars: dict[str, int],
             data_feed: str = MARKET_DATA_FEED,
             symbol_reliability: list[dict[str, Any]] | None = None,
+            run_mode: str = "MANUAL",
     ) -> dict[str, Any]:
         source = source.upper()
         if source not in {"REPLAY", "LIVE"}:
@@ -296,6 +297,10 @@ class DashboardExporter:
             .replace("+00:00", "Z")
         )
 
+        run_mode = run_mode.strip().upper()
+        if run_mode not in {"MANUAL", "SCHEDULED", "REPLAY"}:
+            run_mode = "MANUAL"
+
         payload = {
             "id": f"{source.lower()}-{date_str}",
             "tradingDate": date_str,
@@ -304,6 +309,20 @@ class DashboardExporter:
             "status": status,
             "updatedAt": updated_at,
             "symbols": symbols,
+            "productionHealth": {
+                "runMode": (
+                    "REPLAY"
+                    if source == "REPLAY"
+                    else run_mode
+                ),
+                "workflowStatus": "COMPLETED",
+                "marketDay": True,
+                "dataStatus": (
+                    "HEALTHY"
+                    if status == "COMPLETE"
+                    else "WARNING"
+                ),
+            },
         }
 
         if symbol_reliability is not None:
@@ -321,6 +340,7 @@ class DashboardExporter:
             processed_bars: dict[str, int],
             data_feed: str = MARKET_DATA_FEED,
             symbol_reliability: list[dict[str, Any]] | None = None,
+            run_mode: str = "MANUAL",
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -337,6 +357,7 @@ class DashboardExporter:
             processed_bars=processed_bars,
             data_feed=data_feed,
             symbol_reliability=symbol_reliability,
+            run_mode=run_mode,
         )
 
         response = self.post_fn(

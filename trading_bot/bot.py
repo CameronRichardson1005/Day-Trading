@@ -1,3 +1,4 @@
+import os
 import time as time_module
 
 from contextlib import redirect_stdout
@@ -666,6 +667,14 @@ class TradingBot:
                 data_feed=data_feed,
                 symbol_reliability=(
                     self.symbol_reliability
+                ),
+                run_mode=os.getenv(
+                    "TRADING_RUN_MODE",
+                    (
+                        "REPLAY"
+                        if source == "REPLAY"
+                        else "MANUAL"
+                    ),
                 ),
             )
         except Exception as error:

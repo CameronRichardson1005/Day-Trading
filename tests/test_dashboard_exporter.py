@@ -316,3 +316,43 @@ def test_payload_omits_reliability_when_unavailable():
     )
 
     assert "symbolReliability" not in payload
+
+
+def test_payload_includes_manual_production_health():
+    stock = Stock(symbol="TEST")
+    stock.green_minutes = 15
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-07-28",
+        source="LIVE",
+        stocks={"TEST": stock},
+        processed_bars={"TEST": 15},
+        data_feed="iex",
+        run_mode="MANUAL",
+    )
+
+    assert payload["productionHealth"] == {
+        "runMode": "MANUAL",
+        "workflowStatus": "COMPLETED",
+        "marketDay": True,
+        "dataStatus": "WARNING",
+    }
+
+
+def test_payload_includes_scheduled_run_mode():
+    stock = Stock(symbol="TEST")
+    stock.green_minutes = 15
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-07-28",
+        source="LIVE",
+        stocks={"TEST": stock},
+        processed_bars={"TEST": 15},
+        data_feed="iex",
+        run_mode="SCHEDULED",
+    )
+
+    assert (
+        payload["productionHealth"]["runMode"]
+        == "SCHEDULED"
+    )
