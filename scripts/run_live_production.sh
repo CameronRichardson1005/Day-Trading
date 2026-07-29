@@ -17,6 +17,27 @@ if [[ -f "$COMPLETION_FILE" ]]; then
   exit 0
 fi
 
+echo "Checking NYSE trading calendar for $RUN_DATE..." \
+  | tee -a "$LOG_FILE"
+
+set +e
+"$PYTHON" main.py market-day "$RUN_DATE" 2>&1 \
+  | tee -a "$LOG_FILE"
+MARKET_DAY_EXIT=${pipestatus[1]}
+set -e
+
+if [[ "$MARKET_DAY_EXIT" -eq 2 ]]; then
+  echo "Production launch skipped: NYSE is closed today." \
+    | tee -a "$LOG_FILE"
+  exit 0
+fi
+
+if [[ "$MARKET_DAY_EXIT" -ne 0 ]]; then
+  echo "Production launch failed: market calendar check failed." \
+    | tee -a "$LOG_FILE"
+  exit 1
+fi
+
 {
   echo
   echo "========================================"
