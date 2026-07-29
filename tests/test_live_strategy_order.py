@@ -19,8 +19,8 @@ def test_live_strategy_runs_before_dashboard(
                 2026,
                 7,
                 28,
-                17,
-                0,
+                9,
+                25,
                 tzinfo=tz,
             )
 

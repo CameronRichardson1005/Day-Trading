@@ -129,8 +129,8 @@ def test_live_scanner_and_dashboard_run_before_tracking(
                 2026,
                 7,
                 27,
-                8,
-                0,
+                9,
+                25,
                 tzinfo=tz,
             )
 
@@ -222,8 +222,8 @@ def test_dashboard_failure_does_not_stop_tracking(
                 2026,
                 7,
                 27,
-                8,
-                0,
+                9,
+                25,
                 tzinfo=tz,
             )
 

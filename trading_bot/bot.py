@@ -480,6 +480,30 @@ class TradingBot:
             tzinfo=eastern,
         )
 
+        now_eastern = datetime.now(eastern)
+        earliest_start = (
+            market_open_eastern
+            - timedelta(minutes=10)
+        )
+        latest_start = (
+            market_end_eastern
+            + timedelta(minutes=6)
+        )
+
+        if now_eastern < earliest_start:
+            print(
+                "Live workflow skipped: current New York "
+                "time is earlier than 09:20."
+            )
+            return
+
+        if now_eastern > latest_start:
+            print(
+                "Live workflow skipped: the 09:30–09:45 "
+                "opening window has already passed."
+            )
+            return
+
         window_start = market_open_eastern.astimezone(
             utc
         ).replace(tzinfo=None)
