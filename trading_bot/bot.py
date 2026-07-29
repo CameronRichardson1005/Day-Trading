@@ -616,6 +616,29 @@ class TradingBot:
             for symbol, stock in getattr(self, "stocks", {}).items()
         }
 
+        print()
+        print("Calculating live strategy results...")
+
+        try:
+            if write_sheets:
+                self.run_strategy_and_write(
+                    date_str=date_str,
+                )
+            else:
+                self.calculate_strategy(
+                    date_str=date_str,
+                )
+
+            print(
+                "Live strategy calculation completed."
+            )
+        except Exception as error:
+            print(
+                "Live strategy calculation failed. "
+                "Dashboard will preserve data warnings."
+            )
+            print(f"Strategy error: {error}")
+
         if publish_dashboard:
             self._publish_dashboard_session(
                 date_str=date_str,
