@@ -241,6 +241,46 @@ class DashboardExporter:
         if (
             strategy_complete
             and stock.signal == "INVEST"
+            and stock.webull_preview is not None
+        ):
+            preview = stock.webull_preview
+
+            payload["webullPreview"] = {
+                "status": str(
+                    preview.get(
+                        "status",
+                        "PREVIEW FAILED",
+                    )
+                ),
+                "submitted": False,
+            }
+
+            optional_fields = {
+                "quantity": "quantity",
+                "limitBuy": "limitBuy",
+                "target": "target",
+                "tradingStopLoss": "tradingStopLoss",
+                "riskPerShare": "riskPerShare",
+                "plannedRisk": "plannedRisk",
+                "estimatedCost": "estimatedCost",
+                "estimatedTransactionFee": (
+                    "estimatedTransactionFee"
+                ),
+                "currency": "currency",
+                "error": "error",
+            }
+
+            for output_name, source_name in optional_fields.items():
+                value = preview.get(source_name)
+
+                if value is not None:
+                    payload["webullPreview"][
+                        output_name
+                    ] = value
+
+        if (
+            strategy_complete
+            and stock.signal == "INVEST"
             and stock.outcome is not None
         ):
             payload["outcome"] = dict(

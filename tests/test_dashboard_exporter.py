@@ -356,3 +356,72 @@ def test_payload_includes_scheduled_run_mode():
         payload["productionHealth"]["runMode"]
         == "SCHEDULED"
     )
+
+
+def test_invest_symbol_exports_webull_preview():
+    stock = Stock(symbol="SOFI")
+    stock.signal = "INVEST"
+    stock.opening_bar = {
+        "o": 16.90,
+        "h": 17.00,
+        "l": 16.70,
+        "c": 16.75,
+    }
+    stock.atr = 0.90
+    stock.candle_range = 0.30
+    stock.atr_threshold = 0.225
+    stock.is_manipulation = True
+    stock.is_red = True
+    stock.limit_buy = 16.70
+    stock.limit_sell = 16.81
+    stock.stop_loss = 16.64
+    stock.trading_stop_loss = 16.59
+    stock.webull_preview = {
+        "status": "PREVIEW READY",
+        "submitted": False,
+        "symbol": "SOFI",
+        "quantity": 227,
+        "limitBuy": 16.70,
+        "target": 16.81,
+        "tradingStopLoss": 16.59,
+        "riskPerShare": 0.11,
+        "plannedRisk": 24.97,
+        "estimatedCost": 3790.90,
+        "estimatedTransactionFee": 0.0,
+        "currency": "USD",
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-07-29",
+        source="LIVE",
+        stocks={"SOFI": stock},
+        processed_bars={"SOFI": 15},
+        data_feed="iex",
+    )
+
+    preview = payload["symbols"][0]["webullPreview"]
+
+    assert preview["status"] == "PREVIEW READY"
+    assert preview["submitted"] is False
+    assert preview["quantity"] == 227
+    assert preview["estimatedCost"] == 3790.90
+    assert preview["estimatedTransactionFee"] == 0.0
+
+
+def test_no_invest_symbol_does_not_export_webull_preview():
+    stock = Stock(symbol="RIVN")
+    stock.signal = "NO INVEST"
+    stock.webull_preview = {
+        "status": "PREVIEW READY",
+        "submitted": False,
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-07-29",
+        source="LIVE",
+        stocks={"RIVN": stock},
+        processed_bars={"RIVN": 15},
+        data_feed="iex",
+    )
+
+    assert "webullPreview" not in payload["symbols"][0]
