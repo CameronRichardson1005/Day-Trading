@@ -6,8 +6,16 @@ PROJECT_DIR="/Users/cameronrichardson/PycharmProjects/PythonProject"
 PYTHON="/Users/cameronrichardson/PycharmProjects/PythonProjects/bin/python"
 LOCK_DIR="/tmp/cameron-day-trading-bot.lock"
 LOG_FILE="$PROJECT_DIR/logs/production-launch.log"
+RUN_DATE="$(TZ=America/New_York date +%F)"
+COMPLETION_FILE="$PROJECT_DIR/logs/live-complete-$RUN_DATE"
 
 cd "$PROJECT_DIR"
+
+if [[ -f "$COMPLETION_FILE" ]]; then
+  echo "Production launch skipped: $RUN_DATE already completed." \
+    | tee -a "$LOG_FILE"
+  exit 0
+fi
 
 {
   echo
@@ -48,6 +56,8 @@ echo "Starting live trading-data workflow..." \
 
 "$PYTHON" main.py live 2>&1 \
   | tee -a "$LOG_FILE"
+
+touch "$COMPLETION_FILE"
 
 echo "Production workflow finished: $(date)" \
   | tee -a "$LOG_FILE"
