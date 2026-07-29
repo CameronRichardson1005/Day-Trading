@@ -1,8 +1,10 @@
 import logging
 import sys
+from datetime import date
 
 from trading_bot.bot import TradingBot
 from trading_bot.config import MARKET_DATA_FEED
+from trading_bot.market_calendar import nyse_trading_dates
 from trading_bot.utils import setup_logging
 
 
@@ -18,6 +20,44 @@ def main() -> int:
     )
 
     try:
+        if mode == "market-day":
+            if len(sys.argv) > 3:
+                print(
+                    "Usage: python main.py market-day "
+                    "[YYYY-MM-DD]"
+                )
+                return 2
+
+            try:
+                check_date = (
+                    date.fromisoformat(sys.argv[2])
+                    if len(sys.argv) == 3
+                    else date.today()
+                )
+            except ValueError:
+                print(
+                    "Market date must use YYYY-MM-DD."
+                )
+                return 1
+
+            trading_dates = nyse_trading_dates(
+                check_date,
+                check_date,
+            )
+
+            if trading_dates:
+                print(
+                    f"NYSE is scheduled to trade on "
+                    f"{check_date.isoformat()}."
+                )
+                return 0
+
+            print(
+                f"NYSE is closed on "
+                f"{check_date.isoformat()}."
+            )
+            return 2
+
         bot = TradingBot()
 
         if mode == "test":
