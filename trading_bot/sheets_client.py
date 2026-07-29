@@ -374,6 +374,11 @@ class SheetsClient:
             "Limit Buy",
             "Limit Sell",
             "Trading Stop Loss",
+            "Webull Preview",
+            "Quantity",
+            "Estimated Cost",
+            "Estimated Fee",
+            "Submitted",
         ]
 
         worksheet = self.get_or_create_worksheet(
@@ -395,6 +400,33 @@ class SheetsClient:
                     round(stock.limit_buy, 4),
                     round(stock.limit_sell, 4),
                     round(stock.trading_stop_loss, 4),
+                    (
+                        stock.webull_preview.get("status")
+                        if stock.webull_preview
+                        else "NOT PREVIEWED"
+                    ),
+                    (
+                        stock.webull_preview.get("quantity", "")
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    (
+                        stock.webull_preview.get(
+                            "estimatedCost",
+                            "",
+                        )
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    (
+                        stock.webull_preview.get(
+                            "estimatedTransactionFee",
+                            "",
+                        )
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    "NO",
                 ]
             )
 
@@ -403,7 +435,7 @@ class SheetsClient:
             columns=order_columns,
             date_str=date_str,
             replacement_rows=order_rows,
-            last_column="E",
+            last_column="J",
             sheet_name="Orders",
         )
 

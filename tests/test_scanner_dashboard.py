@@ -189,6 +189,11 @@ def test_orders_sheet_uses_original_trading_stop_loss():
         "Limit Buy",
         "Limit Sell",
         "Trading Stop Loss",
+        "Webull Preview",
+        "Quantity",
+        "Estimated Cost",
+        "Estimated Fee",
+        "Submitted",
     ]
     assert captured["replacement_rows"] == [
         [
@@ -197,5 +202,10 @@ def test_orders_sheet_uses_original_trading_stop_loss():
             4.25,
             4.5,
             4.05,
+            "NOT PREVIEWED",
+            "",
+            "",
+            "",
+            "NO",
         ]
     ]

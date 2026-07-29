@@ -103,3 +103,46 @@ CREDS_FILE = os.getenv(
 
     ),
 )
+
+# Webull preview-only integration.
+WEBULL_APP_KEY = os.getenv(
+    "WEBULL_APP_KEY",
+    "",
+).strip()
+
+WEBULL_APP_SECRET = os.getenv(
+    "WEBULL_APP_SECRET",
+    "",
+).strip()
+
+WEBULL_PREVIEW_ENABLED = (
+    os.getenv(
+        "WEBULL_PREVIEW_ENABLED",
+        "false",
+    ).strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
+WEBULL_PREVIEW_RISK_DOLLARS = float(
+    os.getenv(
+        "WEBULL_PREVIEW_RISK_DOLLARS",
+        "25",
+    )
+)
+
+WEBULL_PREVIEW_MAX_SHARES = int(
+    os.getenv(
+        "WEBULL_PREVIEW_MAX_SHARES",
+        "1000",
+    )
+)
+
+if WEBULL_PREVIEW_RISK_DOLLARS <= 0:
+    raise RuntimeError(
+        "WEBULL_PREVIEW_RISK_DOLLARS must be positive."
+    )
+
+if WEBULL_PREVIEW_MAX_SHARES <= 0:
+    raise RuntimeError(
+        "WEBULL_PREVIEW_MAX_SHARES must be positive."
+    )

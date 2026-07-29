@@ -43,3 +43,6 @@ class Stock:
 
     # Read-only replay outcome
     outcome: dict[str, Any] | None = None
+
+    # Webull preview only. Never represents a submitted order.
+    webull_preview: dict[str, Any] | None = None

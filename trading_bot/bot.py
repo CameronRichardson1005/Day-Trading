@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Thread
 from zoneinfo import ZoneInfo
 
+from .webull_preview_service import WebullPreviewService
 from .alpaca_client import AlpacaClient
 from .backtest import (
     BacktestReport,
@@ -1205,6 +1206,54 @@ class TradingBot:
                 f"Error: {error}"
             )
 
+        print()
+        print("Preparing Webull order previews...")
+
+        try:
+            preview_service = WebullPreviewService()
+            preview_results = (
+                preview_service.prepare_previews(
+                    stocks=self.stocks,
+                )
+            )
+
+            if not preview_results:
+                print(
+                    "No Webull previews were generated."
+                )
+
+            for preview in preview_results:
+                symbol = preview["symbol"]
+                status = preview["status"]
+
+                if status == "PREVIEW READY":
+                    print(
+                        f"{symbol}: PREVIEW READY · "
+                        f"{preview['quantity']} shares · "
+                        f"limit ${preview['limitBuy']:.4f} · "
+                        f"target ${preview['target']:.4f} · "
+                        "trading stop "
+                        f"${preview['tradingStopLoss']:.4f} · "
+                        "estimated cost "
+                        f"${preview['estimatedCost']:.2f} · "
+                        "fee "
+                        f"${preview['estimatedTransactionFee']:.2f} · "
+                        "NOT SUBMITTED"
+                    )
+                else:
+                    print(
+                        f"{symbol}: PREVIEW FAILED · "
+                        f"{preview.get('error', 'Unknown error')}"
+                    )
+
+        except Exception as error:
+            print(
+                "Webull preview preparation failed. "
+                "Strategy and Sheets results were preserved."
+            )
+            print(f"Webull preview error: {error}")
+
+
         try:
             self.sheets.write_orders(
                 date_str=date_str,
@@ -1227,6 +1276,7 @@ class TradingBot:
             )
 
         print("Strategy results written successfully.")
+
 
     def run_production(self) -> None:
         eastern = ZoneInfo("America/New_York")
