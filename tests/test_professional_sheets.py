@@ -20,3 +20,32 @@ def test_status_colour_is_case_insensitive():
         SheetsClient._status_colour("preview ready")
         == SheetsClient._status_colour("PREVIEW READY")
     )
+
+
+def test_history_sort_key():
+    assert (
+        SheetsClient._history_sort_key(
+            ["2026-07-30", "OPEN"]
+        )
+        == "2026-07-30"
+    )
+    assert SheetsClient._history_sort_key([]) == ""
+
+
+def test_dates_sort_newest_first():
+    rows = [
+        ["2026-07-28", "OPEN"],
+        ["2026-07-30", "SOFI"],
+        ["2026-07-29", "RIVN"],
+    ]
+
+    rows.sort(
+        key=SheetsClient._history_sort_key,
+        reverse=True,
+    )
+
+    assert [row[0] for row in rows] == [
+        "2026-07-30",
+        "2026-07-29",
+        "2026-07-28",
+    ]

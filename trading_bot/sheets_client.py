@@ -1112,6 +1112,87 @@ class SheetsClient:
             f"Today sheet refreshed for {date_str}."
         )
 
+
+    @staticmethod
+    def _history_sort_key(row: list) -> str:
+        """
+        Return the Date value used to sort historical rows.
+
+        Dates are stored as YYYY-MM-DD, so descending text order is
+        also descending chronological order.
+        """
+        if not row:
+            return ""
+
+        return str(row[0]).strip()
+
+    def sort_history_sheets(self) -> None:
+        """
+        Sort every historical worksheet newest-date first.
+
+        Only worksheets whose first header is Date are changed.
+        User-facing worksheets such as Today are left unchanged.
+        """
+        excluded_titles = {
+            "Today",
+            "Dashboard",
+        }
+
+        sorted_count = 0
+
+        for worksheet in self.spreadsheet.worksheets():
+            if worksheet.title in excluded_titles:
+                continue
+
+            values = worksheet.get_all_values()
+
+            if not values:
+                continue
+
+            columns = values[0]
+
+            if not columns or columns[0].strip() != "Date":
+                continue
+
+            column_count = len(columns)
+            dated_rows = []
+            undated_rows = []
+
+            for row in values[1:]:
+                normalised = self._normalise_row(
+                    row=row,
+                    column_count=column_count,
+                )
+
+                if self._history_sort_key(normalised):
+                    dated_rows.append(normalised)
+                else:
+                    undated_rows.append(normalised)
+
+            dated_rows.sort(
+                key=self._history_sort_key,
+                reverse=True,
+            )
+
+            ordered_rows = [
+                *dated_rows,
+                *undated_rows,
+            ]
+
+            self._rewrite_table(
+                worksheet=worksheet,
+                columns=columns,
+                rows=ordered_rows,
+                last_column=self._column_name(column_count),
+            )
+
+            sorted_count += 1
+
+        print(
+            f"{sorted_count} historical worksheet(s) sorted "
+            "newest first."
+        )
+
     def finalise_daily_workbook(
         self,
         date_str: str,
@@ -1122,6 +1203,7 @@ class SheetsClient:
         """
         self.write_daily_summary(date_str)
         self.write_production_run(date_str)
+        self.sort_history_sheets()
         self.refresh_today_sheet(date_str)
         self.format_all_sheets()
 
