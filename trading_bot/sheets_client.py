@@ -912,6 +912,206 @@ class SheetsClient:
             sheet_name="Production Runs",
         )
 
+
+    def refresh_today_sheet(
+        self,
+        date_str: str,
+    ) -> None:
+        """
+        Build a clean user-facing view for one trading date.
+
+        Historical data remains stored in the archive worksheets.
+        """
+        sections: list[list] = []
+
+        sections.extend(
+            [
+                ["TRADING DESK — TODAY"],
+                ["Trading Date", date_str],
+                ["Execution Mode", "WEBULL PREVIEW ONLY"],
+                ["Orders Submitted Automatically", "NO"],
+                [],
+            ]
+        )
+
+        try:
+            summary_sheet = self.spreadsheet.worksheet(
+                "Daily Summary"
+            )
+            summary_columns, summary_rows = (
+                self._sheet_rows_for_date(
+                    summary_sheet,
+                    date_str,
+                )
+            )
+        except gspread.exceptions.WorksheetNotFound:
+            summary_columns = []
+            summary_rows = []
+
+        sections.append(["DAILY SUMMARY"])
+
+        if summary_rows:
+            summary = summary_rows[-1]
+
+            for index, column in enumerate(summary_columns):
+                value = (
+                    summary[index]
+                    if index < len(summary)
+                    else ""
+                )
+                sections.append([column, value])
+        else:
+            sections.append(
+                ["Status", "No daily summary available"]
+            )
+
+        sections.append([])
+        sections.append(
+            [
+                "TODAY'S ORDERS",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+
+        order_columns = [
+            "Date",
+            "Symbol",
+            "Limit Buy",
+            "Limit Sell",
+            "Trading Stop Loss",
+            "Webull Preview",
+            "Quantity",
+            "Estimated Cost",
+            "Estimated Fee",
+            "Submitted",
+        ]
+
+        try:
+            orders_sheet = self.spreadsheet.worksheet("Orders")
+            existing_columns, order_rows = (
+                self._sheet_rows_for_date(
+                    orders_sheet,
+                    date_str,
+                )
+            )
+
+            if existing_columns:
+                order_columns = existing_columns
+        except gspread.exceptions.WorksheetNotFound:
+            order_rows = []
+
+        sections.append(order_columns)
+
+        if order_rows:
+            sections.extend(order_rows)
+        else:
+            sections.append(
+                [
+                    date_str,
+                    "No INVEST orders",
+                    "",
+                    "",
+                    "",
+                    "NOT PREVIEWED",
+                    "",
+                    "",
+                    "",
+                    "NO",
+                ]
+            )
+
+        sections.append([])
+        sections.append(
+            [
+                "TODAY'S STRATEGY RESULTS",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+
+        try:
+            invest_sheet = self.spreadsheet.worksheet("Invest")
+            invest_columns, invest_rows = (
+                self._sheet_rows_for_date(
+                    invest_sheet,
+                    date_str,
+                )
+            )
+        except gspread.exceptions.WorksheetNotFound:
+            invest_columns = []
+            invest_rows = []
+
+        if invest_columns:
+            sections.append(invest_columns)
+            sections.extend(invest_rows)
+        else:
+            sections.append(
+                ["Status", "No strategy results available"]
+            )
+
+        maximum_columns = max(
+            len(row)
+            for row in sections
+            if row
+        )
+
+        normalised_rows = [
+            self._normalise_row(
+                row=row,
+                column_count=maximum_columns,
+            )
+            for row in sections
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Today",
+            rows=max(150, len(normalised_rows) + 20),
+            cols=maximum_columns,
+        )
+
+        last_column = self._column_name(maximum_columns)
+
+        worksheet.clear()
+        worksheet.resize(
+            rows=max(150, len(normalised_rows) + 20),
+            cols=maximum_columns,
+        )
+        worksheet.update(
+            range_name=(
+                f"A1:{last_column}{len(normalised_rows)}"
+            ),
+            values=normalised_rows,
+            value_input_option="USER_ENTERED",
+        )
+
+        self.format_worksheet(worksheet)
+
+        print(
+            f"Today sheet refreshed for {date_str}."
+        )
+
     def finalise_daily_workbook(
         self,
         date_str: str,
@@ -922,6 +1122,7 @@ class SheetsClient:
         """
         self.write_daily_summary(date_str)
         self.write_production_run(date_str)
+        self.refresh_today_sheet(date_str)
         self.format_all_sheets()
 
         print(
