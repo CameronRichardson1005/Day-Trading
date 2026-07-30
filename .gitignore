@@ -31,3 +31,6 @@ trading-bot-source.zip
 conf/
 webull_data_sdk.log*
 webull_trade_sdk.log*
+
+# Local migration backups
+backups/
