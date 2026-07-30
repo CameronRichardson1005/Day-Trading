@@ -267,6 +267,668 @@ class SheetsClient:
             }
         }
 
+
+    @staticmethod
+    def _column_name(column_number: int) -> str:
+        """
+        Convert a one-based column number into a Google Sheets
+        column name.
+        """
+        result = ""
+        number = column_number
+
+        while number:
+            number, remainder = divmod(number - 1, 26)
+            result = chr(65 + remainder) + result
+
+        return result
+
+    @staticmethod
+    def _status_colour(value: str) -> dict | None:
+        normalised = str(value).strip().upper()
+
+        green_values = {
+            "INVEST",
+            "SELECTED",
+            "PREVIEW READY",
+            "READY",
+            "COMPLETE",
+            "COMPLETED",
+            "YES",
+            "GREEN",
+            "PASSED",
+            "SUCCESS",
+        }
+
+        red_values = {
+            "NO INVEST",
+            "FAILED",
+            "ERROR",
+            "RED",
+            "INCOMPLETE",
+        }
+
+        amber_values = {
+            "NO",
+            "NOT SUBMITTED",
+            "NOT PREVIEWED",
+            "ELIGIBLE - LIMIT REACHED",
+            "PARTIAL",
+            "WARNING",
+        }
+
+        if normalised in green_values:
+            return {
+                "red": 0.82,
+                "green": 0.94,
+                "blue": 0.84,
+            }
+
+        if normalised in red_values:
+            return {
+                "red": 0.98,
+                "green": 0.82,
+                "blue": 0.82,
+            }
+
+        if normalised in amber_values:
+            return {
+                "red": 1.0,
+                "green": 0.93,
+                "blue": 0.72,
+            }
+
+        if (
+            "EXCLUDED" in normalised
+            or "LOW IEX RELIABILITY" in normalised
+        ):
+            return {
+                "red": 0.98,
+                "green": 0.82,
+                "blue": 0.82,
+            }
+
+        return None
+
+    def format_worksheet(self, worksheet) -> None:
+        """
+        Apply consistent professional formatting to a worksheet.
+
+        This does not delete, rename, or replace any data.
+        """
+        values = worksheet.get_all_values()
+
+        if not values:
+            return
+
+        columns = values[0]
+        row_count = max(len(values), 2)
+        column_count = max(len(columns), 1)
+        sheet_id = worksheet.id
+
+        header_background = {
+            "red": 0.09,
+            "green": 0.20,
+            "blue": 0.33,
+        }
+
+        body_background = {
+            "red": 1.0,
+            "green": 1.0,
+            "blue": 1.0,
+        }
+
+        border_colour = {
+            "red": 0.80,
+            "green": 0.83,
+            "blue": 0.87,
+        }
+
+        requests = [
+            {
+                "updateSheetProperties": {
+                    "properties": {
+                        "sheetId": sheet_id,
+                        "gridProperties": {
+                            "frozenRowCount": 1,
+                        },
+                    },
+                    "fields": (
+                        "gridProperties.frozenRowCount"
+                    ),
+                }
+            },
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": header_background,
+                            "textFormat": {
+                                "foregroundColor": {
+                                    "red": 1,
+                                    "green": 1,
+                                    "blue": 1,
+                                },
+                                "bold": True,
+                                "fontSize": 10,
+                            },
+                            "horizontalAlignment": "CENTER",
+                            "verticalAlignment": "MIDDLE",
+                            "wrapStrategy": "WRAP",
+                            "borders": {
+                                "bottom": {
+                                    "style": "SOLID_MEDIUM",
+                                    "color": border_colour,
+                                }
+                            },
+                        }
+                    },
+                    "fields": "userEnteredFormat",
+                }
+            },
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": row_count,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "backgroundColor": body_background,
+                            "verticalAlignment": "MIDDLE",
+                            "wrapStrategy": "WRAP",
+                            "textFormat": {
+                                "fontSize": 10,
+                            },
+                            "borders": {
+                                "bottom": {
+                                    "style": "SOLID",
+                                    "color": border_colour,
+                                }
+                            },
+                        }
+                    },
+                    "fields": "userEnteredFormat",
+                }
+            },
+            {
+                "autoResizeDimensions": {
+                    "dimensions": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": 0,
+                        "endIndex": column_count,
+                    }
+                }
+            },
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": 0,
+                        "endIndex": 1,
+                    },
+                    "properties": {
+                        "pixelSize": 38,
+                    },
+                    "fields": "pixelSize",
+                }
+            },
+        ]
+
+        currency_four_decimals = {
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Average Price",
+            "Average Range",
+            "Prev Day Range (ATR)",
+            "ATR x 0.25",
+            "Candle Range",
+            "Limit Buy",
+            "Limit Sell",
+            "Stop Loss",
+            "Trading Stop Loss",
+            "Running High",
+            "Running Low",
+        }
+
+        currency_two_decimals = {
+            "Estimated Cost",
+            "Estimated Fee",
+        }
+
+        integer_columns = {
+            "Valid Bars",
+            "Average Volume",
+            "Quantity",
+            "Scanner Rows",
+            "Selected Symbols",
+            "Strategy Rows",
+            "Invest Signals",
+            "Order Previews",
+            "Orders Submitted",
+        }
+
+        percentage_columns = {
+            "Average Range %",
+            "Reliability",
+            "Completeness",
+        }
+
+        date_columns = {
+            "Date",
+        }
+
+        time_columns = {
+            "Last Update Time",
+            "Completed At",
+            "Last Updated",
+        }
+
+        left_aligned_columns = {
+            "Decision",
+            "Proximity to High/Low",
+        }
+
+        for index, column in enumerate(columns):
+            column_range = {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "endRowIndex": row_count,
+                "startColumnIndex": index,
+                "endColumnIndex": index + 1,
+            }
+
+            if column in currency_four_decimals:
+                number_format = {
+                    "type": "CURRENCY",
+                    "pattern": "$#,##0.0000",
+                }
+            elif column in currency_two_decimals:
+                number_format = {
+                    "type": "CURRENCY",
+                    "pattern": "$#,##0.00",
+                }
+            elif column in integer_columns:
+                number_format = {
+                    "type": "NUMBER",
+                    "pattern": "#,##0",
+                }
+            elif column in percentage_columns:
+                number_format = {
+                    "type": "NUMBER",
+                    "pattern": '0.00"%"',
+                }
+            elif column in date_columns:
+                number_format = {
+                    "type": "DATE",
+                    "pattern": "yyyy-mm-dd",
+                }
+            elif column in time_columns:
+                number_format = {
+                    "type": "DATE_TIME",
+                    "pattern": "yyyy-mm-dd hh:mm:ss",
+                }
+            else:
+                number_format = None
+
+            if number_format is not None:
+                requests.append(
+                    {
+                        "repeatCell": {
+                            "range": column_range,
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "numberFormat": number_format,
+                                }
+                            },
+                            "fields": (
+                                "userEnteredFormat.numberFormat"
+                            ),
+                        }
+                    }
+                )
+
+            alignment = (
+                "LEFT"
+                if column in left_aligned_columns
+                else "CENTER"
+            )
+
+            requests.append(
+                {
+                    "repeatCell": {
+                        "range": column_range,
+                        "cell": {
+                            "userEnteredFormat": {
+                                "horizontalAlignment": alignment,
+                            }
+                        },
+                        "fields": (
+                            "userEnteredFormat."
+                            "horizontalAlignment"
+                        ),
+                    }
+                }
+            )
+
+        for row_index, row in enumerate(values[1:], start=1):
+            for column_index, value in enumerate(row):
+                colour = self._status_colour(value)
+
+                if colour is None:
+                    continue
+
+                requests.append(
+                    {
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": sheet_id,
+                                "startRowIndex": row_index,
+                                "endRowIndex": row_index + 1,
+                                "startColumnIndex": column_index,
+                                "endColumnIndex": column_index + 1,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "backgroundColor": colour,
+                                    "textFormat": {
+                                        "bold": True,
+                                    },
+                                    "horizontalAlignment": "CENTER",
+                                }
+                            },
+                            "fields": (
+                                "userEnteredFormat."
+                                "backgroundColor,"
+                                "userEnteredFormat."
+                                "textFormat.bold,"
+                                "userEnteredFormat."
+                                "horizontalAlignment"
+                            ),
+                        }
+                    }
+                )
+
+        self.spreadsheet.batch_update(
+            {
+                "requests": requests,
+            }
+        )
+
+    def format_all_sheets(self) -> None:
+        """
+        Apply professional formatting to every worksheet in the
+        workbook.
+        """
+        formatted = 0
+
+        for worksheet in self.spreadsheet.worksheets():
+            try:
+                self.format_worksheet(worksheet)
+                formatted += 1
+            except Exception as error:
+                print(
+                    f"Formatting skipped for {worksheet.title}: "
+                    f"{error}"
+                )
+
+        print(
+            f"{formatted} worksheet(s) professionally formatted."
+        )
+
+    @staticmethod
+    def _sheet_rows_for_date(
+        worksheet,
+        date_str: str,
+    ) -> tuple[list[str], list[list[str]]]:
+        values = worksheet.get_all_values()
+
+        if not values:
+            return [], []
+
+        columns = values[0]
+        rows = [
+            row
+            for row in values[1:]
+            if row and row[0] == date_str
+        ]
+
+        return columns, rows
+
+    def write_daily_summary(
+        self,
+        date_str: str,
+    ) -> None:
+        """
+        Build one permanent summary row for a trading date.
+        """
+        scanner_rows = []
+        strategy_rows = []
+        order_rows = []
+
+        try:
+            _, scanner_rows = self._sheet_rows_for_date(
+                self.spreadsheet.worksheet(
+                    "Scanner Dashboard"
+                ),
+                date_str,
+            )
+        except gspread.exceptions.WorksheetNotFound:
+            pass
+
+        try:
+            strategy_columns, strategy_rows = (
+                self._sheet_rows_for_date(
+                    self.spreadsheet.worksheet("Invest"),
+                    date_str,
+                )
+            )
+        except gspread.exceptions.WorksheetNotFound:
+            strategy_columns = []
+
+        try:
+            order_columns, order_rows = (
+                self._sheet_rows_for_date(
+                    self.spreadsheet.worksheet("Orders"),
+                    date_str,
+                )
+            )
+        except gspread.exceptions.WorksheetNotFound:
+            order_columns = []
+
+        selected_count = 0
+        for row in scanner_rows:
+            if len(row) > 9 and row[9].strip().upper() == "YES":
+                selected_count += 1
+
+        signal_index = (
+            strategy_columns.index("Signal")
+            if "Signal" in strategy_columns
+            else -1
+        )
+
+        invest_count = sum(
+            1
+            for row in strategy_rows
+            if (
+                signal_index >= 0
+                and len(row) > signal_index
+                and row[signal_index].strip().upper() == "INVEST"
+            )
+        )
+
+        preview_index = (
+            order_columns.index("Webull Preview")
+            if "Webull Preview" in order_columns
+            else -1
+        )
+
+        submitted_index = (
+            order_columns.index("Submitted")
+            if "Submitted" in order_columns
+            else -1
+        )
+
+        preview_count = sum(
+            1
+            for row in order_rows
+            if (
+                preview_index >= 0
+                and len(row) > preview_index
+                and row[preview_index].strip().upper()
+                == "PREVIEW READY"
+            )
+        )
+
+        submitted_count = sum(
+            1
+            for row in order_rows
+            if (
+                submitted_index >= 0
+                and len(row) > submitted_index
+                and row[submitted_index].strip().upper()
+                in {"YES", "TRUE", "SUBMITTED"}
+            )
+        )
+
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        completed_at = datetime.now(
+            ZoneInfo("America/New_York")
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        columns = [
+            "Date",
+            "Scanner Rows",
+            "Selected Symbols",
+            "Strategy Rows",
+            "Invest Signals",
+            "Order Previews",
+            "Orders Submitted",
+            "Last Updated",
+            "Status",
+        ]
+
+        row = [
+            date_str,
+            len(scanner_rows),
+            selected_count,
+            len(strategy_rows),
+            invest_count,
+            preview_count,
+            submitted_count,
+            completed_at,
+            "COMPLETE",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Daily Summary",
+            rows=250,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=[row],
+            last_column="I",
+            sheet_name="Daily Summary",
+        )
+
+    def write_production_run(
+        self,
+        date_str: str,
+    ) -> None:
+        """
+        Store one end-of-day production audit record.
+        """
+        import os
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        completed_at = datetime.now(
+            ZoneInfo("America/New_York")
+        ).strftime("%Y-%m-%d %H:%M:%S")
+
+        columns = [
+            "Date",
+            "Completed At",
+            "Run Mode",
+            "Data Feed",
+            "Strategy Status",
+            "Sheets Status",
+            "Webull Status",
+            "Submitted",
+            "Overall Status",
+        ]
+
+        row = [
+            date_str,
+            completed_at,
+            os.getenv("TRADING_RUN_MODE", "MANUAL"),
+            os.getenv("ALPACA_DATA_FEED", "iex").upper(),
+            "COMPLETE",
+            "COMPLETE",
+            (
+                "PREVIEW ONLY"
+                if os.getenv(
+                    "WEBULL_PREVIEW_ENABLED",
+                    "false",
+                ).lower() == "true"
+                else "DISABLED"
+            ),
+            "NO",
+            "COMPLETE",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Production Runs",
+            rows=250,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=[row],
+            last_column="I",
+            sheet_name="Production Runs",
+        )
+
+    def finalise_daily_workbook(
+        self,
+        date_str: str,
+    ) -> None:
+        """
+        Complete the permanent daily archive and professionally
+        format every worksheet.
+        """
+        self.write_daily_summary(date_str)
+        self.write_production_run(date_str)
+        self.format_all_sheets()
+
+        print(
+            f"Google Sheets daily archive finalised for "
+            f"{date_str}."
+        )
+
     def write_strategy_results(
             self,
             date_str: str,

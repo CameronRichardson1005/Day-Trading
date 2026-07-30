@@ -1299,6 +1299,16 @@ class TradingBot:
                 + " | ".join(write_errors)
             )
 
+        try:
+            self.sheets.finalise_daily_workbook(
+                date_str=date_str,
+            )
+        except Exception as error:
+            print(
+                "Google Sheets daily archive finalisation "
+                f"failed: {error}"
+            )
+
         print("Strategy results written successfully.")
 
 
