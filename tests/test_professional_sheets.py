@@ -49,3 +49,21 @@ def test_dates_sort_newest_first():
         "2026-07-29",
         "2026-07-28",
     ]
+
+
+def test_normalise_bar_timestamp():
+    utc_value, eastern_value = (
+        SheetsClient._normalise_bar_timestamp(
+            "2026-07-30T13:30:00Z"
+        )
+    )
+
+    assert utc_value == "2026-07-30 13:30:00"
+    assert eastern_value == "2026-07-30 09:30:00"
+
+
+def test_normalise_bar_timestamp_empty():
+    assert (
+        SheetsClient._normalise_bar_timestamp("")
+        == ("", "")
+    )

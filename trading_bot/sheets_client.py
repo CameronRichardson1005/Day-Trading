@@ -503,6 +503,7 @@ class SheetsClient:
             "Trading Stop Loss",
             "Running High",
             "Running Low",
+            "VWAP",
         }
 
         currency_two_decimals = {
@@ -513,6 +514,8 @@ class SheetsClient:
         integer_columns = {
             "Valid Bars",
             "Average Volume",
+            "Volume",
+            "Trade Count",
             "Quantity",
             "Scanner Rows",
             "Selected Symbols",
@@ -534,6 +537,8 @@ class SheetsClient:
 
         time_columns = {
             "Last Update Time",
+            "Timestamp UTC",
+            "Timestamp ET",
             "Completed At",
             "Last Updated",
         }
@@ -1210,6 +1215,144 @@ class SheetsClient:
         print(
             f"Google Sheets daily archive finalised for "
             f"{date_str}."
+        )
+
+
+    @staticmethod
+    def _normalise_bar_timestamp(
+        timestamp: str,
+    ) -> tuple[str, str]:
+        """
+        Return UTC and New York timestamp labels for one Alpaca bar.
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        raw = str(timestamp).strip()
+
+        if not raw:
+            return "", ""
+
+        parsed = datetime.fromisoformat(
+            raw.replace("Z", "+00:00")
+        )
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(
+                tzinfo=ZoneInfo("UTC")
+            )
+
+        utc_value = parsed.astimezone(
+            ZoneInfo("UTC")
+        )
+        eastern_value = parsed.astimezone(
+            ZoneInfo("America/New_York")
+        )
+
+        return (
+            utc_value.strftime("%Y-%m-%d %H:%M:%S"),
+            eastern_value.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+    def write_minute_bars_history(
+        self,
+        date_str: str,
+        stocks: dict,
+        data_feed: str = "iex",
+        source: str = "LIVE",
+    ) -> None:
+        """
+        Store every genuine reconciled one-minute bar permanently.
+
+        Rows for the supplied date are rebuilt from the current
+        in-memory bars. All other historical dates are preserved.
+        """
+        columns = [
+            "Date",
+            "Symbol",
+            "Timestamp UTC",
+            "Timestamp ET",
+            "Open",
+            "High",
+            "Low",
+            "Close",
+            "Volume",
+            "Trade Count",
+            "VWAP",
+            "Data Feed",
+            "Source",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Minute Bars History",
+            rows=2000,
+            cols=len(columns),
+        )
+
+        unique_rows: dict[
+            tuple[str, str],
+            list,
+        ] = {}
+
+        for stock in stocks.values():
+            for bar in stock.minute_bars:
+                raw_timestamp = str(
+                    bar.get("t", "")
+                ).strip()
+
+                if not raw_timestamp:
+                    continue
+
+                timestamp_utc, timestamp_et = (
+                    self._normalise_bar_timestamp(
+                        raw_timestamp
+                    )
+                )
+
+                key = (
+                    stock.symbol,
+                    timestamp_utc,
+                )
+
+                unique_rows[key] = [
+                    date_str,
+                    stock.symbol,
+                    timestamp_utc,
+                    timestamp_et,
+                    bar.get("o", ""),
+                    bar.get("h", ""),
+                    bar.get("l", ""),
+                    bar.get("c", ""),
+                    bar.get("v", ""),
+                    bar.get("n", ""),
+                    bar.get("vw", ""),
+                    data_feed.strip().upper(),
+                    source.strip().upper(),
+                ]
+
+        history_rows = [
+            unique_rows[key]
+            for key in sorted(
+                unique_rows,
+                key=lambda item: (
+                    item[0],
+                    item[1],
+                ),
+            )
+        ]
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=history_rows,
+            last_column="M",
+            sheet_name="Minute Bars History",
+        )
+
+        print(
+            f"{len(history_rows)} genuine minute bar(s) "
+            "reconciled in the Minute Bars History sheet."
         )
 
     def write_strategy_results(

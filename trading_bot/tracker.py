@@ -408,6 +408,50 @@ class MinuteTracker:
                 updates=sheet_updates,
             )
 
+        if (
+            self.write_sheets
+            and self.sheets is not None
+            and hasattr(
+                self.sheets,
+                "write_minute_bars_history",
+            )
+        ):
+            try:
+                date_values = {
+                    str(bar.get("t", ""))[:10]
+                    for stock in self.stocks.values()
+                    for bar in stock.minute_bars
+                    if bar.get("t")
+                }
+
+                if len(date_values) == 1:
+                    archive_date = next(
+                        iter(date_values)
+                    )
+                else:
+                    archive_date = (
+                        window_start.strftime(
+                            "%Y-%m-%d"
+                        )
+                    )
+
+                from .config import MARKET_DATA_FEED
+
+                self.sheets.write_minute_bars_history(
+                    date_str=archive_date,
+                    stocks=self.stocks,
+                    data_feed=MARKET_DATA_FEED,
+                    source="LIVE",
+                )
+            except Exception as error:
+                print(
+                    "Minute Bars History update failed. "
+                    "Live processing will continue."
+                )
+                print(
+                    f"Minute history error: {error}"
+                )
+
         return processed_counts
 
     def track_window(
