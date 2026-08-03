@@ -1,0 +1,130 @@
+SANITIZED LIVE PRODUCTION OUTPUT
+================================
+
+Run date: 2026-08-03
+Data feed: Alpaca IEX
+Execution mode: Webull preview only
+Orders submitted: No
+
+Sensitive Webull SDK initialization messages and personal filesystem paths
+were removed. Scanner, market-data, strategy, preview, archive, and
+completion output are preserved.
+
+Production launch: Mon Aug  3 09:25:43 EDT 2026
+========================================
+Running production preflight...
+2026-08-03 09:25:43 | INFO | Log file: logs/2026-08-03.log
+2026-08-03 09:25:43 | INFO | 
+2026-08-03 09:25:43 | INFO | ===================================
+2026-08-03 09:25:43 | INFO |  Trading Bot Preflight
+2026-08-03 09:25:43 | INFO | ===================================
+2026-08-03 09:25:43 | INFO | Preflight date: 2026-08-03
+2026-08-03 09:26:14 | INFO | BBAI: IEX opening reliability 72.7% across 10 day(s).
+2026-08-03 09:26:14 | INFO | OPEN: IEX opening reliability 93.3% across 10 day(s).
+2026-08-03 09:26:14 | INFO | SOUN: IEX opening reliability 89.3% across 10 day(s).
+2026-08-03 09:26:14 | INFO | SOFI: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | RIVN: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | PLTR: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | SNAP: IEX opening reliability 90.7% across 10 day(s).
+2026-08-03 09:26:14 | INFO | UBER: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | PINS: IEX opening reliability 97.3% across 10 day(s).
+2026-08-03 09:26:14 | INFO | RGTI: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | SOXL: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:14 | INFO | LYFT: IEX opening reliability 99.3% across 10 day(s).
+2026-08-03 09:26:14 | INFO | BBAI: EXCLUDED - LOW IEX RELIABILITY
+2026-08-03 09:26:14 | INFO | OPEN: SELECTED
+2026-08-03 09:26:14 | INFO | SOUN: EXCLUDED - LOW IEX RELIABILITY
+2026-08-03 09:26:14 | INFO | SOFI: SELECTED
+2026-08-03 09:26:14 | INFO | RIVN: SELECTED
+2026-08-03 09:26:14 | INFO | PLTR: SELECTED
+2026-08-03 09:26:14 | INFO | SNAP: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:14 | INFO | UBER: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:14 | INFO | PINS: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:14 | INFO | RGTI: SELECTED
+2026-08-03 09:26:14 | INFO | SOXL: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:14 | INFO | LYFT: SELECTED
+2026-08-03 09:26:14 | INFO | Selected symbols: OPEN, SOFI, RIVN, PLTR, RGTI, LYFT
+2026-08-03 09:26:14 | INFO | Scanner check passed.
+2026-08-03 09:26:14 | INFO | Checking Google Sheets and tracker initialisation...
+2026-08-03 09:26:16 | INFO | Google Sheets check passed.
+2026-08-03 09:26:16 | INFO | Minute tracker initialisation passed.
+2026-08-03 09:26:16 | INFO | 
+2026-08-03 09:26:16 | INFO | Preflight completed successfully.
+2026-08-03 09:26:16 | INFO | No minute tracking, strategy, dashboard write, or order workflow was started.
+Starting live trading-data workflow...
+2026-08-03 09:26:16 | INFO | Log file: logs/2026-08-03.log
+2026-08-03 09:26:46 | INFO | BBAI: IEX opening reliability 72.7% across 10 day(s).
+2026-08-03 09:26:46 | INFO | OPEN: IEX opening reliability 93.3% across 10 day(s).
+2026-08-03 09:26:46 | INFO | SOUN: IEX opening reliability 89.3% across 10 day(s).
+2026-08-03 09:26:46 | INFO | SOFI: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | RIVN: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | PLTR: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | SNAP: IEX opening reliability 90.7% across 10 day(s).
+2026-08-03 09:26:46 | INFO | UBER: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | PINS: IEX opening reliability 97.3% across 10 day(s).
+2026-08-03 09:26:46 | INFO | RGTI: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | SOXL: IEX opening reliability 100.0% across 10 day(s).
+2026-08-03 09:26:46 | INFO | LYFT: IEX opening reliability 99.3% across 10 day(s).
+2026-08-03 09:26:46 | INFO | BBAI: EXCLUDED - LOW IEX RELIABILITY
+2026-08-03 09:26:46 | INFO | OPEN: SELECTED
+2026-08-03 09:26:46 | INFO | SOUN: EXCLUDED - LOW IEX RELIABILITY
+2026-08-03 09:26:46 | INFO | SOFI: SELECTED
+2026-08-03 09:26:46 | INFO | RIVN: SELECTED
+2026-08-03 09:26:46 | INFO | PLTR: SELECTED
+2026-08-03 09:26:46 | INFO | SNAP: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:46 | INFO | UBER: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:46 | INFO | PINS: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:46 | INFO | RGTI: SELECTED
+2026-08-03 09:26:46 | INFO | SOXL: NOT SELECTED - RANKING LIMIT
+2026-08-03 09:26:46 | INFO | LYFT: SELECTED
+2026-08-03 09:26:46 | INFO | Selected symbols: OPEN, SOFI, RIVN, PLTR, RGTI, LYFT
+2026-08-03 09:26:48 | INFO | 6 scanner row(s) reconciled in the Scanner Dashboard sheet.
+2026-08-03 09:26:48 | INFO | 
+2026-08-03 09:26:48 | INFO | Starting real-time 1-minute tracker...
+2026-08-03 09:26:48 | INFO | Tracking window: 09:30 to 09:45 New York time
+2026-08-03 09:26:48 | INFO | Starting IEX WebSocket collector...
+2026-08-03 09:31:05 | INFO | 1-minute update logged for 13:30
+2026-08-03 09:32:04 | INFO | 1-minute update logged for 13:31
+2026-08-03 09:33:04 | INFO | 1-minute update logged for 13:32
+2026-08-03 09:34:03 | INFO | 1-minute update logged for 13:33
+2026-08-03 09:35:03 | INFO | 1-minute update logged for 13:34
+2026-08-03 09:36:03 | INFO | 1-minute update logged for 13:35
+2026-08-03 09:37:03 | INFO | 1-minute update logged for 13:36
+2026-08-03 09:38:03 | INFO | 1-minute update logged for 13:37
+2026-08-03 09:39:03 | INFO | 1-minute update logged for 13:38
+2026-08-03 09:40:03 | INFO | 1-minute update logged for 13:39
+2026-08-03 09:41:03 | INFO | 1-minute update logged for 13:40
+2026-08-03 09:42:03 | INFO | 1-minute update logged for 13:41
+2026-08-03 09:43:03 | INFO | 1-minute update logged for 13:42
+2026-08-03 09:44:03 | INFO | 1-minute update logged for 13:43
+2026-08-03 09:45:03 | INFO | 1-minute update logged for 13:44
+2026-08-03 09:45:03 | INFO | Reconciling the complete opening window...
+2026-08-03 09:45:07 | INFO | OPEN: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:07 | INFO | SOFI: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:07 | INFO | RIVN: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:07 | INFO | PLTR: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:07 | INFO | RGTI: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:07 | INFO | LYFT: reconciliation completed with 15/15 bars.
+2026-08-03 09:45:09 | INFO | 90 genuine minute bar(s) reconciled in the Minute Bars History sheet.
+2026-08-03 09:45:09 | INFO | Finished real-time 1-minute tracking window.
+2026-08-03 09:45:09 | INFO | Merging 93 WebSocket bar(s)...
+2026-08-03 09:45:10 | INFO | WebSocket bars merged successfully.
+2026-08-03 09:45:10 | INFO | 
+2026-08-03 09:45:10 | INFO | Calculating live strategy results...
+2026-08-03 09:45:10 | INFO | 
+2026-08-03 09:45:10 | INFO | Running strategy for 2026-08-03...
+2026-08-03 09:45:12 | INFO | INVEST signals: RIVN, PLTR
+2026-08-03 09:45:13 | INFO | 6 strategy row(s) reconciled in the Invest sheet.
+2026-08-03 09:45:13 | INFO | 
+2026-08-03 09:45:13 | INFO | Preparing Webull order previews...
+2026-08-03 09:45:14 | INFO | RIVN: PREVIEW READY · 213 shares · limit $15.2400 · target $15.3737 · trading stop $15.1231 · estimated cost $3246.12 · fee $0.00 · NOT SUBMITTED
+2026-08-03 09:45:14 | INFO | PLTR: PREVIEW READY · 39 shares · limit $123.7400 · target $124.9166 · trading stop $123.1017 · estimated cost $4825.86 · fee $0.00 · NOT SUBMITTED
+2026-08-03 09:45:15 | INFO | 2 order(s) reconciled in the Orders sheet.
+2026-08-03 09:45:28 | INFO | 10 historical worksheet(s) sorted newest first.
+2026-08-03 09:45:32 | INFO | Today sheet refreshed for 2026-08-03.
+2026-08-03 09:45:41 | INFO | 11 worksheet(s) professionally formatted.
+2026-08-03 09:45:41 | INFO | Google Sheets daily archive finalised for 2026-08-03.
+2026-08-03 09:45:41 | INFO | Strategy results written successfully.
+2026-08-03 09:45:41 | INFO | Live strategy calculation completed.
+2026-08-03 09:45:42 | INFO | Dashboard session uploaded: INCOMPLETE.
+Production workflow finished: Mon Aug  3 09:45:43 EDT 2026
