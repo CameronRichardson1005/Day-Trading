@@ -165,6 +165,84 @@ def main() -> int:
                 data_feed=data_feed,
             )
 
+        elif mode == "fibonacci-paper":
+            date_str = None
+            output_path = (
+                "reports/fibonacci-paper/"
+                "fibonacci_paper_ledger.csv"
+            )
+            data_feed = MARKET_DATA_FEED
+            slippage_bps = 15.0
+
+            options_start = 2
+
+            if (
+                len(sys.argv) > 2
+                and not sys.argv[2].startswith("--")
+            ):
+                date_str = sys.argv[2]
+                options_start = 3
+
+            options = sys.argv[options_start:]
+
+            if len(options) % 2:
+                print(
+                    "Usage: python main.py "
+                    "fibonacci-paper [YYYY-MM-DD] "
+                    "[--output FILE] "
+                    "[--feed iex|sip] "
+                    "[--slippage-bps NUMBER]"
+                )
+                return 2
+
+            for index in range(0, len(options), 2):
+                option = options[index]
+                value = options[index + 1]
+
+                if option == "--output":
+                    output_path = value
+
+                elif option == "--feed":
+                    data_feed = value.lower()
+
+                    if data_feed not in {"iex", "sip"}:
+                        print(
+                            "Feed must be 'iex' or 'sip'."
+                        )
+                        return 2
+
+                elif option == "--slippage-bps":
+                    try:
+                        slippage_bps = float(value)
+                    except ValueError:
+                        print(
+                            "Slippage bps must be a number."
+                        )
+                        return 2
+
+                    if slippage_bps < 0:
+                        print(
+                            "Slippage bps cannot be negative."
+                        )
+                        return 2
+
+                else:
+                    print(
+                        "Usage: python main.py "
+                        "fibonacci-paper [YYYY-MM-DD] "
+                        "[--output FILE] "
+                        "[--feed iex|sip] "
+                        "[--slippage-bps NUMBER]"
+                    )
+                    return 2
+
+            bot.run_fibonacci_paper(
+                date_str=date_str,
+                output_path=output_path,
+                data_feed=data_feed,
+                slippage_bps=slippage_bps,
+            )
+
         elif mode == "fibonacci-retracement":
             if len(sys.argv) < 4:
                 print(

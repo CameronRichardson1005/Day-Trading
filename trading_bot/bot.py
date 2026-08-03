@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo
 from .webull_preview_service import WebullPreviewService
 from .alpaca_client import AlpacaClient
 from .fibonacci_research import FibonacciResearchReport
+from .fibonacci_paper import (
+    FibonacciPaperLedger,
+    build_fibonacci_paper_record,
+)
 from .fibonacci_retracement import (
     FibonacciRetracementReport,
     analyse_symbol_day,
@@ -931,6 +935,234 @@ class TradingBot:
         return session
 
 
+
+
+    def run_fibonacci_paper(
+        self,
+        date_str: str | None = None,
+        output_path: str | Path = (
+            "reports/fibonacci-paper/"
+            "fibonacci_paper_ledger.csv"
+        ),
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 15.0,
+    ) -> list:
+        """
+        Evaluate the Fibonacci paper rule for one session.
+
+        This mode writes only to its independent CSV ledger.
+        It cannot write Google Sheets, publish the dashboard,
+        call Webull, create previews, or submit orders.
+        """
+        data_feed = data_feed.strip().lower()
+
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Market-data feed must be 'iex' or 'sip'."
+            )
+
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+        now = datetime.now(eastern)
+
+        if date_str is None:
+            trading_date = now.date()
+            date_str = trading_date.isoformat()
+        else:
+            try:
+                trading_date = datetime.strptime(
+                    date_str,
+                    "%Y-%m-%d",
+                ).date()
+            except ValueError as error:
+                raise ValueError(
+                    "Paper date must use YYYY-MM-DD."
+                ) from error
+
+        if trading_date > now.date():
+            raise ValueError(
+                "Fibonacci paper mode cannot evaluate "
+                "a future date."
+            )
+
+        if trading_date.weekday() >= 5:
+            print()
+            print(
+                f"{date_str} is a weekend. "
+                "No paper evaluation was performed."
+            )
+            return []
+
+        session_start_eastern = datetime.combine(
+            trading_date,
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        )
+
+        market_close_eastern = datetime.combine(
+            trading_date,
+            time(hour=16),
+            tzinfo=eastern,
+        )
+
+        if trading_date == now.date():
+            if now < session_start_eastern:
+                print()
+                print(
+                    "The market has not opened yet. "
+                    "No Fibonacci paper evaluation "
+                    "was performed."
+                )
+                return []
+
+            session_end_eastern = min(
+                now,
+                market_close_eastern,
+            )
+        else:
+            session_end_eastern = market_close_eastern
+
+        print()
+        print("===================================")
+        print(" Fibonacci Paper Mode")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            f"Modeled slippage: "
+            f"{slippage_bps:.1f} bps"
+        )
+        print("PAPER ONLY — NOT SUBMITTED")
+        print(
+            "Google Sheets, dashboard, Webull, previews, "
+            "and production orders are disabled."
+        )
+
+        with redirect_stdout(StringIO()):
+            self.refresh_symbols_for_date(
+                date_str,
+                data_feed=data_feed,
+            )
+
+        symbols_csv = self.symbols_csv
+
+        session_start = (
+            session_start_eastern
+            .astimezone(utc)
+        )
+
+        session_end = (
+            session_end_eastern
+            .astimezone(utc)
+        )
+
+        bars_by_symbol = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=symbols_csv,
+                start_iso=session_start.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                end_iso=session_end.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        paper_records = []
+
+        for symbol in self.stocks:
+            setups = analyse_symbol_day(
+                date_str=date_str,
+                symbol=symbol,
+                data_feed=data_feed,
+                bars=bars_by_symbol.get(symbol, []),
+                atr=atrs.get(symbol),
+                minimum_impulse_atr=0.50,
+                slippage_bps=slippage_bps,
+                commission_per_share=0.0,
+            )
+
+            for setup in setups:
+                record = build_fibonacci_paper_record(
+                    setup,
+                    modeled_slippage_bps=(
+                        slippage_bps
+                    ),
+                )
+
+                if record is not None:
+                    paper_records.append(record)
+
+        ledger = FibonacciPaperLedger(output_path)
+        ledger_path = ledger.upsert(paper_records)
+
+        print()
+        print(
+            f"Selected symbols evaluated: "
+            f"{len(self.stocks)}"
+        )
+        print(
+            f"Qualifying paper setups: "
+            f"{len(paper_records)}"
+        )
+
+        if not paper_records:
+            print(
+                "No setup satisfied every Fibonacci "
+                "paper rule."
+            )
+
+        for record in paper_records:
+            net_return = (
+                f"{record.net_return_pct:.4f}%"
+                if record.net_return_pct is not None
+                else "Pending"
+            )
+
+            print()
+            print(
+                f"{record.symbol} · "
+                f"{record.fibonacci_level}"
+            )
+            print(
+                f"Impulse: "
+                f"{record.impulse_atr_multiple:.3f} ATR "
+                f"over "
+                f"{record.impulse_duration_minutes} minutes"
+            )
+            print(
+                f"Pullback volume ratio: "
+                f"{record.pullback_volume_ratio:.3f}"
+            )
+            print(
+                f"Entry ${record.entry_price:.4f} · "
+                f"Stop ${record.stop_price:.4f} · "
+                f"Target ${record.target_price:.4f}"
+            )
+            print(
+                f"Outcome: {record.outcome} · "
+                f"Return: {net_return}"
+            )
+            print("PAPER ONLY — NOT SUBMITTED")
+
+        print()
+        print(f"Paper ledger: {ledger_path}")
+
+        return paper_records
 
     def run_fibonacci_retracement_research(
         self,
