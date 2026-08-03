@@ -5,6 +5,7 @@ from datetime import date
 from trading_bot.bot import TradingBot
 from trading_bot.config import MARKET_DATA_FEED
 from trading_bot.fibonacci_paper import print_fibonacci_paper_status
+from trading_bot.fibonacci_dashboard import FibonacciDashboardPublisher
 from trading_bot.market_calendar import nyse_trading_dates
 from trading_bot.utils import setup_logging
 
@@ -175,6 +176,29 @@ def main() -> int:
                 return 2
 
             print_fibonacci_paper_status()
+
+        elif mode == "fibonacci-paper-publish":
+            if len(sys.argv) != 2:
+                print(
+                    "Usage: python main.py "
+                    "fibonacci-paper-publish"
+                )
+                return 2
+
+            publisher = FibonacciDashboardPublisher()
+            result = publisher.publish()
+
+            if result is None:
+                print(
+                    "Fibonacci dashboard upload skipped: "
+                    "DASHBOARD_INGEST_KEY is not configured."
+                )
+                return 0
+
+            print(
+                "Fibonacci paper status uploaded: "
+                "PAPER ONLY — NOT SUBMITTED"
+            )
 
         elif mode == "fibonacci-paper":
             date_str = None
@@ -572,6 +596,7 @@ def main() -> int:
                 "fibonacci-retracement, "
                 "fibonacci-paper, "
                 "fibonacci-paper-status, "
+                "fibonacci-paper-publish, "
                 "backtest, production"
             )
             return 2

@@ -81,5 +81,11 @@ echo "Starting Fibonacci paper evaluation..." \
 
 touch "$COMPLETION_FILE"
 
+echo "Publishing Fibonacci paper dashboard status..." \
+  | tee -a "$LOG_FILE"
+
+"$PYTHON" main.py fibonacci-paper-publish 2>&1 \
+  | tee -a "$LOG_FILE"
+
 echo "Fibonacci paper evaluation completed: $(date)" \
   | tee -a "$LOG_FILE"
