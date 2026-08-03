@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 from .webull_preview_service import WebullPreviewService
 from .alpaca_client import AlpacaClient
+from .fibonacci_research import FibonacciResearchReport
+
 from .backtest import (
     BacktestReport,
     ReplaySession,
@@ -923,6 +925,187 @@ class TradingBot:
             )
 
         return session
+
+
+    def run_fibonacci_research(
+        self,
+        start_date: str,
+        end_date: str,
+        output_directory: str | Path = "reports/fibonacci",
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 0.0,
+        commission_per_share: float = 0.0,
+    ) -> FibonacciResearchReport:
+        """
+        Compare Fibonacci opening-range targets and setup rules.
+
+        This workflow is research-only. It cannot write Google
+        Sheets, upload the dashboard, call Webull, or submit orders.
+        """
+        data_feed = data_feed.strip().lower()
+
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Market-data feed must be 'iex' or 'sip'."
+            )
+
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+
+        if commission_per_share < 0:
+            raise ValueError(
+                "Commission cannot be negative."
+            )
+
+        try:
+            start = datetime.strptime(
+                start_date,
+                "%Y-%m-%d",
+            ).date()
+            end = datetime.strptime(
+                end_date,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Research dates must use YYYY-MM-DD format."
+            ) from error
+
+        dates = weekday_dates(start, end)
+
+        if not dates:
+            raise ValueError(
+                "Research range contains no weekdays."
+            )
+
+        report = FibonacciResearchReport(
+            start_date=start_date,
+            end_date=end_date,
+            data_feed=data_feed,
+            slippage_bps=slippage_bps,
+            commission_per_share=commission_per_share,
+        )
+
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        print()
+        print("===================================")
+        print(" Fibonacci Strategy Research")
+        print("===================================")
+        print(
+            f"Date range: {start_date} to {end_date}"
+        )
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            "READ-ONLY MODE: Google Sheets, dashboard, "
+            "Webull, and orders are disabled."
+        )
+
+        for trading_date in dates:
+            date_str = trading_date.isoformat()
+
+            try:
+                with redirect_stdout(StringIO()):
+                    session = self.run_replay(
+                        date_str=date_str,
+                        speed=0,
+                        publish_dashboard=False,
+                        data_feed=data_feed,
+                        slippage_bps=0.0,
+                        commission_per_share=0.0,
+                    )
+
+                outcome_start = datetime.combine(
+                    trading_date,
+                    time(hour=9, minute=45),
+                    tzinfo=eastern,
+                ).astimezone(utc)
+
+                outcome_end = datetime.combine(
+                    trading_date,
+                    time(hour=16),
+                    tzinfo=eastern,
+                ).astimezone(utc)
+
+                outcome_bars = (
+                    self.alpaca.get_historical_1min_bars(
+                        symbols_csv=",".join(
+                            session.stocks
+                        ),
+                        start_iso=outcome_start.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        ),
+                        end_iso=outcome_end.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        ),
+                        feed=data_feed,
+                    )
+                )
+
+                for symbol, stock in (
+                    session.stocks.items()
+                ):
+                    report.add_stock(
+                        date_str=date_str,
+                        symbol=symbol,
+                        stock=stock,
+                        bars_processed=(
+                            session.summary
+                            .processed_bars
+                            .get(symbol, 0)
+                        ),
+                        outcome_bars=outcome_bars.get(
+                            symbol,
+                            [],
+                        ),
+                    )
+
+                date_records = [
+                    record
+                    for record in report.records
+                    if record.date == date_str
+                ]
+
+                eligible = sum(
+                    record.setup_eligible
+                    for record in date_records
+                )
+
+                print(
+                    f"{date_str}: "
+                    f"{len(session.stocks)} symbols, "
+                    f"{eligible} eligible rule-target "
+                    "observations."
+                )
+
+            except Exception as error:
+                report.add_failure(
+                    date_str,
+                    error,
+                )
+                print(
+                    f"{date_str}: FAILED - {error}"
+                )
+
+        report.print_summary()
+
+        (
+            detail_path,
+            summary_path,
+            symbol_path,
+            failure_path,
+        ) = report.write_csv(output_directory)
+
+        print()
+        print(f"Trade-level results: {detail_path}")
+        print(f"Rule comparison: {summary_path}")
+        print(f"Symbol comparison: {symbol_path}")
+        print(f"Failed sessions: {failure_path}")
+
+        return report
 
     def run_backtest(
             self,

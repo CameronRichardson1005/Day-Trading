@@ -165,6 +165,99 @@ def main() -> int:
                 data_feed=data_feed,
             )
 
+        elif mode == "fibonacci-research":
+            if len(sys.argv) < 4:
+                print(
+                    "Usage: python main.py fibonacci-research "
+                    "START_DATE END_DATE "
+                    "[--output DIRECTORY] "
+                    "[--feed iex|sip] "
+                    "[--slippage-bps NUMBER] "
+                    "[--commission-per-share NUMBER]"
+                )
+                return 2
+
+            output_directory = "reports/fibonacci"
+            data_feed = MARKET_DATA_FEED
+            slippage_bps = 0.0
+            commission_per_share = 0.0
+            research_options = sys.argv[4:]
+
+            if len(research_options) % 2:
+                print(
+                    "Usage: python main.py fibonacci-research "
+                    "START_DATE END_DATE "
+                    "[--output DIRECTORY] "
+                    "[--feed iex|sip] "
+                    "[--slippage-bps NUMBER] "
+                    "[--commission-per-share NUMBER]"
+                )
+                return 2
+
+            for index in range(
+                0,
+                len(research_options),
+                2,
+            ):
+                option = research_options[index]
+                value = research_options[index + 1]
+
+                if option == "--output":
+                    output_directory = value
+
+                elif option == "--feed":
+                    data_feed = value.lower()
+
+                    if data_feed not in {"iex", "sip"}:
+                        print(
+                            "Feed must be 'iex' or 'sip'."
+                        )
+                        return 2
+
+                elif option == "--slippage-bps":
+                    try:
+                        slippage_bps = float(value)
+                    except ValueError:
+                        print(
+                            "Slippage bps must be a number."
+                        )
+                        return 2
+
+                elif option == "--commission-per-share":
+                    try:
+                        commission_per_share = float(
+                            value
+                        )
+                    except ValueError:
+                        print(
+                            "Commission per share must be "
+                            "a number."
+                        )
+                        return 2
+
+                else:
+                    print(
+                        "Usage: python main.py "
+                        "fibonacci-research "
+                        "START_DATE END_DATE "
+                        "[--output DIRECTORY] "
+                        "[--feed iex|sip] "
+                        "[--slippage-bps NUMBER] "
+                        "[--commission-per-share NUMBER]"
+                    )
+                    return 2
+
+            bot.run_fibonacci_research(
+                start_date=sys.argv[2],
+                end_date=sys.argv[3],
+                output_directory=output_directory,
+                data_feed=data_feed,
+                slippage_bps=slippage_bps,
+                commission_per_share=(
+                    commission_per_share
+                ),
+            )
+
         elif mode == "backtest":
             if len(sys.argv) < 4:
                 print(
@@ -265,7 +358,8 @@ def main() -> int:
             print(
                 "Available modes: "
                 "test, smoke, preflight, live, live-dry-run, strategy, "
-                "write, replay, backtest, production"
+                "write, replay, fibonacci-research, "
+                "backtest, production"
             )
             return 2
 
