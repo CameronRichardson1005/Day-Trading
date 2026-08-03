@@ -235,3 +235,232 @@ class FibonacciPaperLedger:
             writer.writerows(ordered_rows)
 
         return self.path
+
+
+def fibonacci_paper_status(
+    ledger_path: str | Path = (
+        "reports/fibonacci-paper/"
+        "fibonacci_paper_ledger.csv"
+    ),
+    logs_directory: str | Path = "logs",
+) -> dict[str, object]:
+    """
+    Read and summarize the Fibonacci paper ledger.
+
+    This function is read-only and cannot submit orders,
+    call Webull, write Google Sheets, or publish dashboards.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ledger_path = Path(ledger_path)
+    logs_directory = Path(logs_directory)
+
+    eastern = ZoneInfo("America/New_York")
+    today = datetime.now(eastern).strftime("%Y-%m-%d")
+
+    completion_marker = (
+        logs_directory
+        / f"fibonacci-paper-complete-{today}"
+    )
+
+    rows: list[dict[str, str]] = []
+
+    if ledger_path.exists():
+        with ledger_path.open(
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            rows = list(csv.DictReader(file))
+
+    closed_trades = [
+        row
+        for row in rows
+        if row.get("outcome") in {"WIN", "LOSS"}
+    ]
+
+    wins = [
+        row
+        for row in closed_trades
+        if row.get("outcome") == "WIN"
+    ]
+
+    losses = [
+        row
+        for row in closed_trades
+        if row.get("outcome") == "LOSS"
+    ]
+
+    returns = [
+        float(row["net_return_pct"])
+        for row in closed_trades
+        if row.get("net_return_pct") not in {
+            "",
+            None,
+        }
+    ]
+
+    positive_returns = [
+        value
+        for value in returns
+        if value > 0
+    ]
+
+    negative_returns = [
+        value
+        for value in returns
+        if value < 0
+    ]
+
+    profit_factor = (
+        sum(positive_returns)
+        / abs(sum(negative_returns))
+        if negative_returns
+        else None
+    )
+
+    latest_setup = None
+
+    if rows:
+        latest_setup = sorted(
+            rows,
+            key=lambda row: (
+                row.get("date", ""),
+                row.get("confirmation_time", ""),
+                row.get("symbol", ""),
+            ),
+            reverse=True,
+        )[0]
+
+    return {
+        "today": today,
+        "today_completed": completion_marker.exists(),
+        "completion_marker": str(completion_marker),
+        "ledger_path": str(ledger_path),
+        "ledger_exists": ledger_path.exists(),
+        "total_setups": len(rows),
+        "closed_trades": len(closed_trades),
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate_pct": (
+            len(wins) / len(closed_trades) * 100.0
+            if closed_trades
+            else None
+        ),
+        "average_return_pct": (
+            sum(returns) / len(returns)
+            if returns
+            else None
+        ),
+        "cumulative_return_pct": sum(returns),
+        "profit_factor": profit_factor,
+        "latest_setup": latest_setup,
+        "safety_status": PAPER_WARNING,
+    }
+
+
+def print_fibonacci_paper_status(
+    ledger_path: str | Path = (
+        "reports/fibonacci-paper/"
+        "fibonacci_paper_ledger.csv"
+    ),
+    logs_directory: str | Path = "logs",
+) -> dict[str, object]:
+    status = fibonacci_paper_status(
+        ledger_path=ledger_path,
+        logs_directory=logs_directory,
+    )
+
+    print()
+    print("===================================")
+    print(" Fibonacci Paper Status")
+    print("===================================")
+    print(status["safety_status"])
+    print(
+        "Today's scheduled check:",
+        (
+            "COMPLETED"
+            if status["today_completed"]
+            else "NOT COMPLETED"
+        ),
+    )
+    print(
+        "Completion marker:",
+        status["completion_marker"],
+    )
+    print("Paper ledger:", status["ledger_path"])
+    print("Total qualifying setups:", status["total_setups"])
+    print("Closed paper trades:", status["closed_trades"])
+    print(
+        f"Wins / losses: "
+        f"{status['wins']} / {status['losses']}"
+    )
+
+    win_rate = status["win_rate_pct"]
+
+    print(
+        "Win rate:",
+        (
+            f"{win_rate:.2f}%"
+            if isinstance(win_rate, float)
+            else "N/A"
+        ),
+    )
+
+    profit_factor = status["profit_factor"]
+
+    print(
+        "Profit factor:",
+        (
+            f"{profit_factor:.3f}"
+            if isinstance(profit_factor, float)
+            else "N/A"
+        ),
+    )
+
+    average_return = status["average_return_pct"]
+
+    print(
+        "Average return:",
+        (
+            f"{average_return:.4f}%"
+            if isinstance(average_return, float)
+            else "N/A"
+        ),
+    )
+
+    print(
+        "Cumulative return:",
+        f"{status['cumulative_return_pct']:.4f}%",
+    )
+
+    latest = status["latest_setup"]
+
+    print()
+    print("Latest qualifying setup:")
+
+    if not isinstance(latest, dict):
+        print("None recorded.")
+    else:
+        print(
+            f"{latest.get('date', '')} · "
+            f"{latest.get('symbol', '')} · "
+            f"{latest.get('fibonacci_level', '')}"
+        )
+        print(
+            f"Outcome: "
+            f"{latest.get('outcome', 'Pending')}"
+        )
+        print(
+            f"Return: "
+            f"{latest.get('net_return_pct') or 'Pending'}"
+        )
+        print(
+            f"Submitted: "
+            f"{latest.get('submitted', 'NO')}"
+        )
+
+    print()
+    print("PAPER ONLY — NOT SUBMITTED")
+
+    return status

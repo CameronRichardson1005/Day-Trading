@@ -4,6 +4,7 @@ from datetime import date
 
 from trading_bot.bot import TradingBot
 from trading_bot.config import MARKET_DATA_FEED
+from trading_bot.fibonacci_paper import print_fibonacci_paper_status
 from trading_bot.market_calendar import nyse_trading_dates
 from trading_bot.utils import setup_logging
 
@@ -164,6 +165,16 @@ def main() -> int:
                 speed=speed,
                 data_feed=data_feed,
             )
+
+        elif mode == "fibonacci-paper-status":
+            if len(sys.argv) != 2:
+                print(
+                    "Usage: python main.py "
+                    "fibonacci-paper-status"
+                )
+                return 2
+
+            print_fibonacci_paper_status()
 
         elif mode == "fibonacci-paper":
             date_str = None
@@ -559,6 +570,8 @@ def main() -> int:
                 "test, smoke, preflight, live, live-dry-run, strategy, "
                 "write, replay, fibonacci-research, "
                 "fibonacci-retracement, "
+                "fibonacci-paper, "
+                "fibonacci-paper-status, "
                 "backtest, production"
             )
             return 2

@@ -144,3 +144,80 @@ def test_ledger_updates_instead_of_duplicating(
     assert len(rows) == 1
     assert rows[0]["outcome"] == "WIN"
     assert rows[0]["submitted"] == "NO"
+
+
+def test_status_summarises_ledger(
+    tmp_path,
+):
+    from trading_bot.fibonacci_paper import (
+        fibonacci_paper_status,
+    )
+
+    ledger = FibonacciPaperLedger(
+        tmp_path / "ledger.csv"
+    )
+
+    win = build_fibonacci_paper_record(
+        setup(),
+        modeled_slippage_bps=15.0,
+    )
+
+    loss_setup = replace(
+        setup(),
+        symbol="RIVN",
+        outcome="LOSS",
+        net_return_pct=-0.5,
+    )
+
+    loss = build_fibonacci_paper_record(
+        loss_setup,
+        modeled_slippage_bps=15.0,
+    )
+
+    assert win is not None
+    assert loss is not None
+
+    ledger.upsert([win, loss])
+
+    status = fibonacci_paper_status(
+        ledger_path=ledger.path,
+        logs_directory=tmp_path,
+    )
+
+    assert status["total_setups"] == 2
+    assert status["closed_trades"] == 2
+    assert status["wins"] == 1
+    assert status["losses"] == 1
+    assert status["today_completed"] is False
+    assert status["safety_status"] == (
+        "PAPER ONLY — NOT SUBMITTED"
+    )
+
+
+def test_status_detects_completion_marker(
+    tmp_path,
+):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from trading_bot.fibonacci_paper import (
+        fibonacci_paper_status,
+    )
+
+    today = datetime.now(
+        ZoneInfo("America/New_York")
+    ).strftime("%Y-%m-%d")
+
+    marker = (
+        tmp_path
+        / f"fibonacci-paper-complete-{today}"
+    )
+    marker.touch()
+
+    status = fibonacci_paper_status(
+        ledger_path=tmp_path / "missing.csv",
+        logs_directory=tmp_path,
+    )
+
+    assert status["today_completed"] is True
+    assert status["total_setups"] == 0
