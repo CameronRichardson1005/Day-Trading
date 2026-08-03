@@ -184,10 +184,10 @@ def test_status_summarises_ledger(
         logs_directory=tmp_path,
     )
 
-    assert status["total_setups"] == 2
-    assert status["closed_trades"] == 2
-    assert status["wins"] == 1
-    assert status["losses"] == 1
+    assert status["forward"]["total_setups"] == 2
+    assert status["forward"]["closed_trades"] == 2
+    assert status["forward"]["wins"] == 1
+    assert status["forward"]["losses"] == 1
     assert status["today_completed"] is False
     assert status["safety_status"] == (
         "PAPER ONLY — NOT SUBMITTED"
@@ -220,4 +220,68 @@ def test_status_detects_completion_marker(
     )
 
     assert status["today_completed"] is True
-    assert status["total_setups"] == 0
+    assert status["forward"]["total_setups"] == 0
+    assert status["historical"]["total_setups"] == 0
+
+
+def test_historical_records_are_separate_from_forward(
+    tmp_path,
+):
+    from trading_bot.fibonacci_paper import (
+        fibonacci_paper_status,
+    )
+
+    ledger = FibonacciPaperLedger(
+        tmp_path / "ledger.csv"
+    )
+
+    forward = build_fibonacci_paper_record(
+        setup(),
+        modeled_slippage_bps=15.0,
+        observation_type="FORWARD_PAPER",
+    )
+
+    historical = build_fibonacci_paper_record(
+        replace(
+            setup(),
+            symbol="OPEN",
+        ),
+        modeled_slippage_bps=15.0,
+        observation_type="HISTORICAL_VALIDATION",
+    )
+
+    assert forward is not None
+    assert historical is not None
+
+    ledger.upsert([forward, historical])
+
+    status = fibonacci_paper_status(
+        ledger_path=ledger.path,
+        logs_directory=tmp_path,
+    )
+
+    assert status["forward"]["total_setups"] == 1
+    assert status["forward"]["closed_trades"] == 1
+
+    assert (
+        status["historical"]["total_setups"]
+        == 1
+    )
+    assert (
+        status["historical"]["closed_trades"]
+        == 1
+    )
+
+
+def test_invalid_observation_type_is_rejected():
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="Observation type",
+    ):
+        build_fibonacci_paper_record(
+            setup(),
+            modeled_slippage_bps=15.0,
+            observation_type="LIVE_ORDER",
+        )

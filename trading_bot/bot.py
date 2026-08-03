@@ -1082,6 +1082,16 @@ class TradingBot:
             )
         )
 
+        observation_type = (
+            "FORWARD_PAPER"
+            if trading_date == now.date()
+            else "HISTORICAL_VALIDATION"
+        )
+
+        print(
+            f"Observation type: {observation_type}"
+        )
+
         paper_records = []
 
         for symbol in self.stocks:
@@ -1101,6 +1111,9 @@ class TradingBot:
                     setup,
                     modeled_slippage_bps=(
                         slippage_bps
+                    ),
+                    observation_type=(
+                        observation_type
                     ),
                 )
 

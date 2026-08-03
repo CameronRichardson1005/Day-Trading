@@ -23,6 +23,7 @@ class FibonacciPaperRecord:
     data_feed: str
     paper_status: str
     submitted: str
+    observation_type: str
     rule_name: str
 
     fibonacci_level: str
@@ -83,9 +84,21 @@ def build_fibonacci_paper_record(
     setup: RetracementSetup,
     *,
     modeled_slippage_bps: float,
+    observation_type: str = "FORWARD_PAPER",
 ) -> FibonacciPaperRecord | None:
     if not qualifies_for_fibonacci_paper(setup):
         return None
+
+    observation_type = observation_type.strip().upper()
+
+    if observation_type not in {
+        "FORWARD_PAPER",
+        "HISTORICAL_VALIDATION",
+    }:
+        raise ValueError(
+            "Observation type must be FORWARD_PAPER or "
+            "HISTORICAL_VALIDATION."
+        )
 
     return FibonacciPaperRecord(
         date=setup.date,
@@ -93,6 +106,7 @@ def build_fibonacci_paper_record(
         data_feed=setup.data_feed,
         paper_status=PAPER_WARNING,
         submitted="NO",
+        observation_type=observation_type,
         rule_name=PAPER_RULE_NAME,
         fibonacci_level=setup.fibonacci_level,
         retracement_ratio=setup.retracement_ratio,
@@ -191,9 +205,18 @@ class FibonacciPaperLedger:
                 encoding="utf-8",
             ) as file:
                 for row in csv.DictReader(file):
+                    migrated = dict(row)
+
+                    if not migrated.get(
+                        "observation_type"
+                    ):
+                        migrated[
+                            "observation_type"
+                        ] = "HISTORICAL_VALIDATION"
+
                     rows_by_key[
-                        self._record_key(row)
-                    ] = dict(row)
+                        self._record_key(migrated)
+                    ] = migrated
 
         for record in records:
             row = asdict(record)
@@ -245,10 +268,10 @@ def fibonacci_paper_status(
     logs_directory: str | Path = "logs",
 ) -> dict[str, object]:
     """
-    Read and summarize the Fibonacci paper ledger.
+    Summarize genuine forward paper observations separately
+    from historical validation records.
 
-    This function is read-only and cannot submit orders,
-    call Webull, write Google Sheets, or publish dashboards.
+    This function is strictly read-only.
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -271,59 +294,117 @@ def fibonacci_paper_status(
             newline="",
             encoding="utf-8",
         ) as file:
-            rows = list(csv.DictReader(file))
+            for row in csv.DictReader(file):
+                migrated = dict(row)
 
-    closed_trades = [
+                if not migrated.get(
+                    "observation_type"
+                ):
+                    migrated[
+                        "observation_type"
+                    ] = "HISTORICAL_VALIDATION"
+
+                rows.append(migrated)
+
+    forward_rows = [
         row
         for row in rows
-        if row.get("outcome") in {"WIN", "LOSS"}
+        if row.get("observation_type")
+        == "FORWARD_PAPER"
     ]
 
-    wins = [
+    historical_rows = [
         row
-        for row in closed_trades
-        if row.get("outcome") == "WIN"
+        for row in rows
+        if row.get("observation_type")
+        == "HISTORICAL_VALIDATION"
     ]
 
-    losses = [
-        row
-        for row in closed_trades
-        if row.get("outcome") == "LOSS"
-    ]
+    def summarize(
+        selected: list[dict[str, str]],
+    ) -> dict[str, object]:
+        closed = [
+            row
+            for row in selected
+            if row.get("outcome") in {
+                "WIN",
+                "LOSS",
+            }
+        ]
 
-    returns = [
-        float(row["net_return_pct"])
-        for row in closed_trades
-        if row.get("net_return_pct") not in {
-            "",
-            None,
+        wins = [
+            row
+            for row in closed
+            if row.get("outcome") == "WIN"
+        ]
+
+        losses = [
+            row
+            for row in closed
+            if row.get("outcome") == "LOSS"
+        ]
+
+        returns = [
+            float(row["net_return_pct"])
+            for row in closed
+            if row.get("net_return_pct")
+            not in {"", None}
+        ]
+
+        positive = [
+            value
+            for value in returns
+            if value > 0
+        ]
+
+        negative = [
+            value
+            for value in returns
+            if value < 0
+        ]
+
+        return {
+            "total_setups": len(selected),
+            "closed_trades": len(closed),
+            "wins": len(wins),
+            "losses": len(losses),
+            "win_rate_pct": (
+                len(wins) / len(closed) * 100.0
+                if closed
+                else None
+            ),
+            "average_return_pct": (
+                sum(returns) / len(returns)
+                if returns
+                else None
+            ),
+            "cumulative_return_pct": sum(returns),
+            "profit_factor": (
+                sum(positive)
+                / abs(sum(negative))
+                if negative
+                else None
+            ),
         }
-    ]
 
-    positive_returns = [
-        value
-        for value in returns
-        if value > 0
-    ]
+    latest_forward = None
 
-    negative_returns = [
-        value
-        for value in returns
-        if value < 0
-    ]
+    if forward_rows:
+        latest_forward = sorted(
+            forward_rows,
+            key=lambda row: (
+                row.get("date", ""),
+                row.get("confirmation_time", ""),
+                row.get("symbol", ""),
+            ),
+            reverse=True,
+        )[0]
 
-    profit_factor = (
-        sum(positive_returns)
-        / abs(sum(negative_returns))
-        if negative_returns
-        else None
-    )
+    latest_historical = None
 
-    latest_setup = None
-
-    if rows:
-        latest_setup = sorted(
-            rows,
+    if historical_rows:
+        latest_historical = sorted(
+            historical_rows,
             key=lambda row: (
                 row.get("date", ""),
                 row.get("confirmation_time", ""),
@@ -338,23 +419,10 @@ def fibonacci_paper_status(
         "completion_marker": str(completion_marker),
         "ledger_path": str(ledger_path),
         "ledger_exists": ledger_path.exists(),
-        "total_setups": len(rows),
-        "closed_trades": len(closed_trades),
-        "wins": len(wins),
-        "losses": len(losses),
-        "win_rate_pct": (
-            len(wins) / len(closed_trades) * 100.0
-            if closed_trades
-            else None
-        ),
-        "average_return_pct": (
-            sum(returns) / len(returns)
-            if returns
-            else None
-        ),
-        "cumulative_return_pct": sum(returns),
-        "profit_factor": profit_factor,
-        "latest_setup": latest_setup,
+        "forward": summarize(forward_rows),
+        "historical": summarize(historical_rows),
+        "latest_forward_setup": latest_forward,
+        "latest_historical_setup": latest_historical,
         "safety_status": PAPER_WARNING,
     }
 
@@ -389,58 +457,92 @@ def print_fibonacci_paper_status(
         status["completion_marker"],
     )
     print("Paper ledger:", status["ledger_path"])
-    print("Total qualifying setups:", status["total_setups"])
-    print("Closed paper trades:", status["closed_trades"])
-    print(
-        f"Wins / losses: "
-        f"{status['wins']} / {status['losses']}"
+
+    def print_section(
+        title: str,
+        metrics: dict[str, object],
+    ) -> None:
+        print()
+        print(title)
+        print("-" * len(title))
+        print(
+            "Qualifying setups:",
+            metrics["total_setups"],
+        )
+        print(
+            "Closed paper trades:",
+            metrics["closed_trades"],
+        )
+        print(
+            f"Wins / losses: "
+            f"{metrics['wins']} / "
+            f"{metrics['losses']}"
+        )
+
+        win_rate = metrics["win_rate_pct"]
+
+        print(
+            "Win rate:",
+            (
+                f"{win_rate:.2f}%"
+                if isinstance(win_rate, float)
+                else "N/A"
+            ),
+        )
+
+        profit_factor = metrics["profit_factor"]
+
+        print(
+            "Profit factor:",
+            (
+                f"{profit_factor:.3f}"
+                if isinstance(
+                    profit_factor,
+                    float,
+                )
+                else "N/A"
+            ),
+        )
+
+        average_return = metrics[
+            "average_return_pct"
+        ]
+
+        print(
+            "Average return:",
+            (
+                f"{average_return:.4f}%"
+                if isinstance(
+                    average_return,
+                    float,
+                )
+                else "N/A"
+            ),
+        )
+
+        print(
+            "Cumulative return:",
+            f"{metrics['cumulative_return_pct']:.4f}%",
+        )
+
+    print_section(
+        "FORWARD PAPER PERFORMANCE",
+        status["forward"],
     )
 
-    win_rate = status["win_rate_pct"]
-
-    print(
-        "Win rate:",
-        (
-            f"{win_rate:.2f}%"
-            if isinstance(win_rate, float)
-            else "N/A"
-        ),
+    print_section(
+        "HISTORICAL VALIDATION — EXCLUDED "
+        "FROM FORWARD RESULTS",
+        status["historical"],
     )
 
-    profit_factor = status["profit_factor"]
-
-    print(
-        "Profit factor:",
-        (
-            f"{profit_factor:.3f}"
-            if isinstance(profit_factor, float)
-            else "N/A"
-        ),
-    )
-
-    average_return = status["average_return_pct"]
-
-    print(
-        "Average return:",
-        (
-            f"{average_return:.4f}%"
-            if isinstance(average_return, float)
-            else "N/A"
-        ),
-    )
-
-    print(
-        "Cumulative return:",
-        f"{status['cumulative_return_pct']:.4f}%",
-    )
-
-    latest = status["latest_setup"]
+    latest = status["latest_forward_setup"]
 
     print()
-    print("Latest qualifying setup:")
+    print("Latest forward qualifying setup:")
 
     if not isinstance(latest, dict):
-        print("None recorded.")
+        print("None recorded yet.")
     else:
         print(
             f"{latest.get('date', '')} · "
@@ -464,3 +566,4 @@ def print_fibonacci_paper_status(
     print("PAPER ONLY — NOT SUBMITTED")
 
     return status
+
