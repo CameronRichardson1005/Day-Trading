@@ -288,3 +288,38 @@ def test_dashboard_failure_does_not_stop_tracking(
         ("dashboard", "2026-07-27"),
         ("track", "2026-07-27"),
     ]
+
+
+def test_scanner_universe_has_controlled_size():
+    universe = list(TICKERS) + list(CANDIDATE_TICKERS)
+
+    assert 20 <= len(universe) <= 30
+    assert len(universe) == len(set(universe))
+    assert len(TICKERS) == 6
+    assert len(CANDIDATE_TICKERS) == 18
+
+
+def test_default_scanner_never_selects_more_than_nine():
+    statistics = [
+        StockStats(
+            symbol=symbol,
+            valid_bars=30,
+            avg_volume=2_000_000 - index,
+            avg_price=10.0,
+            avg_range=0.75,
+            avg_range_pct=7.5,
+        )
+        for index, symbol in enumerate(CANDIDATE_TICKERS)
+    ]
+
+    scanner = StockScanner(
+        current_symbols=TICKERS,
+    )
+
+    selected = scanner.select_symbols(statistics)
+
+    assert selected[:len(TICKERS)] == TICKERS
+    assert len(selected) == 9
+    assert len(
+        set(selected) & set(CANDIDATE_TICKERS)
+    ) == 3

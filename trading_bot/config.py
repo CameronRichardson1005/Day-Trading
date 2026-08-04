@@ -43,6 +43,9 @@ TICKERS = [
     "PLTR",
 ]
 
+# Broad scanner universe. The scanner ranks these candidates
+# each session, but only the top three eligible candidates join
+# the six core symbols for live tracking.
 CANDIDATE_TICKERS = [
     "SNAP",
     "UBER",
@@ -50,6 +53,18 @@ CANDIDATE_TICKERS = [
     "RGTI",
     "SOXL",
     "LYFT",
+    "NVDA",
+    "AMD",
+    "INTC",
+    "MU",
+    "F",
+    "NIO",
+    "LCID",
+    "MARA",
+    "RIOT",
+    "HOOD",
+    "AFRM",
+    "DKNG",
 ]
 
 ATR_MULTIPLIER = 0.25
