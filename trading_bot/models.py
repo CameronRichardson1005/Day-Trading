@@ -35,6 +35,11 @@ class Stock:
     # Strategy results
     signal: str = "NO INVEST"
 
+    # Identifies the strategy that produced the active signal.
+    # Historical strategies remain preserved independently.
+    strategy_name: str = ""
+    strategy_status: str = ""
+
     limit_buy: float | None = None
     limit_sell: float | None = None
 

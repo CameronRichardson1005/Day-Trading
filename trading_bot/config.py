@@ -34,6 +34,35 @@ if ALPACA_DATA_FEED not in {"iex", "sip"}:
 
 MARKET_DATA_FEED = ALPACA_DATA_FEED
 
+
+# Active signal strategy.
+#
+# MANIPULATION_OPENING_15M remains available for historical
+# replay, comparison, and audit purposes.
+#
+# FIBONACCI_61_8 is the intended active paper/preview strategy.
+SUPPORTED_STRATEGIES = {
+    "MANIPULATION_OPENING_15M",
+    "FIBONACCI_61_8",
+}
+
+ACTIVE_STRATEGY = os.getenv(
+    "ACTIVE_STRATEGY",
+    "MANIPULATION_OPENING_15M",
+).strip().upper()
+
+if ACTIVE_STRATEGY not in SUPPORTED_STRATEGIES:
+    raise RuntimeError(
+        "ACTIVE_STRATEGY must be one of: "
+        + ", ".join(sorted(SUPPORTED_STRATEGIES))
+    )
+
+MANIPULATION_STRATEGY_NAME = "MANIPULATION_OPENING_15M"
+FIBONACCI_STRATEGY_NAME = "FIBONACCI_61_8"
+
+# Real broker submission remains intentionally unsupported.
+REAL_ORDER_SUBMISSION_ENABLED = False
+
 TICKERS = [
     "BBAI",
     "OPEN",
