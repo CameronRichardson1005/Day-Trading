@@ -63,7 +63,7 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
-export ALPACA_DATA_FEED="sip"
+export ALPACA_DATA_FEED="iex"
 export PYTHONUNBUFFERED="1"
 
 echo "Running production preflight..." \
