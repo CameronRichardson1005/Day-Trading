@@ -2695,6 +2695,93 @@ class TradingBot:
             tzinfo=timezone,
         )
 
+    def calculate_live_fibonacci_outcomes(
+            self,
+            date_str: str,
+            outcome_end: datetime,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Calculate hypothetical Fibonacci outcomes through the
+        supplied cutoff.
+
+        This is analysis only. It cannot submit, cancel, or
+        replace an order.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        outcome_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=45),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        normalized_end = outcome_end
+
+        if normalized_end.tzinfo is None:
+            normalized_end = normalized_end.replace(
+                tzinfo=eastern,
+            )
+
+        normalized_end = normalized_end.astimezone(utc)
+
+        invest_symbols = [
+            symbol
+            for symbol, stock in self.stocks.items()
+            if stock.signal == "INVEST"
+        ]
+
+        for stock in self.stocks.values():
+            stock.outcome = None
+
+        if not invest_symbols:
+            print(
+                "No INVEST signals require outcome tracking."
+            )
+            return
+
+        outcome_bars = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=",".join(invest_symbols),
+                start_iso=outcome_start.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                end_iso=normalized_end.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                feed=data_feed,
+            )
+        )
+
+        replay = HistoricalReplay(
+            stocks=self.stocks,
+            strategy=self.strategy,
+            speed=0,
+        )
+
+        replay.calculate_outcomes(
+            bars_by_symbol=outcome_bars,
+            close_open_positions=False,
+        )
+
+        tracked = sum(
+            stock.outcome is not None
+            for stock in self.stocks.values()
+        )
+
+        print(
+            "Hypothetical outcomes calculated for "
+            f"{tracked} INVEST signal"
+            f"{'' if tracked == 1 else 's'}."
+        )
+        print("PAPER ANALYSIS ONLY — NOT SUBMITTED")
+
     def run_fibonacci_monitor(
             self,
             date_str: str,
@@ -2858,28 +2945,41 @@ class TradingBot:
 
         final_signature = self.current_signal_signature()
 
-        if final_signature != last_signature:
-            if write_sheets:
-                self.publish_current_strategy_results(
-                    date_str=date_str,
-                    initialise_sheets=False,
-                )
+        if final_signature != last_signature and write_sheets:
+            self.publish_current_strategy_results(
+                date_str=date_str,
+                initialise_sheets=False,
+            )
 
-            if publish_dashboard:
-                processed_bars = {
-                    symbol: (
-                        stock.green_minutes
-                        + stock.red_minutes
-                    )
-                    for symbol, stock in self.stocks.items()
-                }
+        print()
+        print("Calculating hypothetical outcomes through cutoff...")
 
-                self._publish_dashboard_session(
-                    date_str=date_str,
-                    source="LIVE_FIBONACCI_FINAL",
-                    processed_bars=processed_bars,
-                    data_feed=MARKET_DATA_FEED,
+        self.calculate_live_fibonacci_outcomes(
+            date_str=date_str,
+            outcome_end=monitor_cutoff,
+            data_feed=MARKET_DATA_FEED,
+        )
+
+        if publish_dashboard:
+            processed_bars = {
+                symbol: (
+                    stock.green_minutes
+                    + stock.red_minutes
                 )
+                for symbol, stock in self.stocks.items()
+            }
+
+            self._publish_dashboard_session(
+                date_str=date_str,
+                source="LIVE_FIBONACCI_FINAL",
+                processed_bars=processed_bars,
+                data_feed=MARKET_DATA_FEED,
+            )
+        else:
+            print(
+                "DRY-RUN MODE: Final Cloudflare dashboard "
+                "publishing skipped."
+            )
 
         if write_sheets:
             self.finalise_strategy_workbook(

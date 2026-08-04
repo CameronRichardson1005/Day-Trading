@@ -47,6 +47,17 @@ def make_bot(events):
         lambda **kwargs: events.append("finalise")
     )
 
+    bot.calculate_live_fibonacci_outcomes = (
+        lambda **kwargs: events.append(
+            (
+                "outcomes",
+                kwargs["outcome_end"].strftime(
+                    "%H:%M:%S"
+                ),
+            )
+        )
+    )
+
     return bot
 
 
@@ -296,6 +307,135 @@ def test_monitor_dry_run_skips_external_outputs(
 
     assert "publish" not in events
     assert "finalise" not in events
+    assert not any(
+        isinstance(event, tuple)
+        and event[0] == "dashboard"
+        for event in events
+    )
+
+
+def test_monitor_always_publishes_final_dashboard(
+        monkeypatch,
+):
+    events = []
+    bot = make_bot(events)
+
+    bot.current_signal_signature = lambda: ()
+
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "FIBONACCI_61_8",
+    )
+    monkeypatch.setattr(
+        bot_module,
+        "FIBONACCI_MONITOR_CUTOFF",
+        "09:46",
+    )
+
+    bot.run_fibonacci_monitor(
+        date_str="2026-08-03",
+        write_sheets=False,
+        publish_dashboard=True,
+        now_fn=sequence_clock([
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                5,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                46,
+                tzinfo=EASTERN,
+            ),
+        ]),
+        sleep_fn=lambda seconds: None,
+    )
+
+    assert (
+        "outcomes",
+        "09:46:00",
+    ) in events
+
+    assert (
+        "dashboard",
+        "LIVE_FIBONACCI_FINAL",
+    ) in events
+
+
+def test_monitor_calculates_outcomes_in_dry_run(
+        monkeypatch,
+):
+    events = []
+    bot = make_bot(events)
+
+    bot.current_signal_signature = lambda: ()
+
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "FIBONACCI_61_8",
+    )
+    monkeypatch.setattr(
+        bot_module,
+        "FIBONACCI_MONITOR_CUTOFF",
+        "09:46",
+    )
+
+    bot.run_fibonacci_monitor(
+        date_str="2026-08-03",
+        write_sheets=False,
+        publish_dashboard=False,
+        now_fn=sequence_clock([
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                5,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                46,
+                tzinfo=EASTERN,
+            ),
+        ]),
+        sleep_fn=lambda seconds: None,
+    )
+
+    assert (
+        "outcomes",
+        "09:46:00",
+    ) in events
+
     assert not any(
         isinstance(event, tuple)
         and event[0] == "dashboard"
