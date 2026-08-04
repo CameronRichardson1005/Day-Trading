@@ -1196,13 +1196,18 @@ class TradingBot:
         ),
         data_feed: str = MARKET_DATA_FEED,
         slippage_bps: float = 15.0,
+        publish_outputs: bool = False,
     ) -> list:
         """
         Evaluate the Fibonacci paper rule for one session.
 
-        This mode writes only to its independent CSV ledger.
-        It cannot write Google Sheets, publish the dashboard,
-        call Webull, create previews, or submit orders.
+        By default this mode writes only to its independent
+        CSV ledger.
+
+        When publish_outputs is explicitly enabled, it may also
+        write only to the dedicated Fibonacci Google Sheets and
+        publish the read-only Cloudflare dashboard. It never calls
+        Webull, creates previews, or submits orders.
         """
         data_feed = data_feed.strip().lower()
 
@@ -1288,10 +1293,20 @@ class TradingBot:
             f"{slippage_bps:.1f} bps"
         )
         print("PAPER ONLY — NOT SUBMITTED")
-        print(
-            "Google Sheets, dashboard, Webull, previews, "
-            "and production orders are disabled."
-        )
+        if publish_outputs:
+            print(
+                "Publishing enabled for Fibonacci Sheets and "
+                "the read-only Cloudflare dashboard."
+            )
+            print(
+                "Webull, previews, and production orders "
+                "remain disabled."
+            )
+        else:
+            print(
+                "Google Sheets, dashboard, Webull, previews, "
+                "and production orders are disabled."
+            )
 
         with redirect_stdout(StringIO()):
             self.refresh_symbols_for_date(
@@ -1424,6 +1439,126 @@ class TradingBot:
 
         print()
         print(f"Paper ledger: {ledger_path}")
+
+        if publish_outputs:
+            print()
+            print(
+                "Preparing dedicated Fibonacci Sheets and "
+                "dashboard output..."
+            )
+
+            processed_bars: dict[str, int] = {}
+
+            for symbol, stock in self.stocks.items():
+                symbol_bars = sorted(
+                    bars_by_symbol.get(symbol, []),
+                    key=lambda bar: str(bar.get("t", "")),
+                )
+
+                opening_bars = []
+
+                for bar in symbol_bars:
+                    timestamp = datetime.fromisoformat(
+                        str(bar["t"]).replace(
+                            "Z",
+                            "+00:00",
+                        )
+                    )
+
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(
+                            tzinfo=utc
+                        )
+
+                    eastern_timestamp = (
+                        timestamp.astimezone(eastern)
+                    )
+
+                    bar_time = eastern_timestamp.time()
+
+                    if (
+                        time(hour=9, minute=30)
+                        <= bar_time
+                        < time(hour=9, minute=45)
+                    ):
+                        opening_bars.append(bar)
+
+                processed_bars[symbol] = len(opening_bars)
+
+                if opening_bars:
+                    stock.opening_bar = {
+                        "o": float(opening_bars[0]["o"]),
+                        "h": max(
+                            float(bar["h"])
+                            for bar in opening_bars
+                        ),
+                        "l": min(
+                            float(bar["l"])
+                            for bar in opening_bars
+                        ),
+                        "c": float(opening_bars[-1]["c"]),
+                        "v": sum(
+                            float(bar.get("v", 0) or 0)
+                            for bar in opening_bars
+                        ),
+                    }
+
+                    stock.candle_range = (
+                        float(stock.opening_bar["h"])
+                        - float(stock.opening_bar["l"])
+                    )
+
+                stock.atr = atrs.get(symbol)
+                stock.atr_threshold = (
+                    float(stock.atr) * 0.25
+                    if stock.atr is not None
+                    else None
+                )
+
+                self.fibonacci_strategy.evaluate(
+                    stock=stock,
+                    date_str=date_str,
+                    bars=symbol_bars,
+                    atr=stock.atr,
+                    data_feed=data_feed,
+                    slippage_bps=slippage_bps,
+                )
+
+            self.initialise_sheets(
+                write_sheets=True,
+            )
+
+            if self.sheets is None:
+                raise RuntimeError(
+                    "Google Sheets was not initialised."
+                )
+
+            self.sheets.write_strategy_results(
+                date_str=date_str,
+                stocks=self.stocks,
+                sheet_name="Fibonacci Invest",
+            )
+
+            # This directly reconciles the dedicated Fibonacci
+            # order sheet. Webull preview generation is deliberately
+            # not called.
+            self.sheets.write_orders(
+                date_str=date_str,
+                stocks=self.stocks,
+                sheet_name="Fibonacci Orders",
+            )
+
+            self._publish_dashboard_session(
+                date_str=date_str,
+                source="LIVE_FIBONACCI_FINAL",
+                processed_bars=processed_bars,
+                data_feed=data_feed,
+            )
+
+            print(
+                "Fibonacci Sheets and dashboard published."
+            )
+            print("PAPER ONLY — NOT SUBMITTED")
 
         return paper_records
 

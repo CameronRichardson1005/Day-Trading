@@ -220,6 +220,7 @@ def main() -> int:
             )
             data_feed = MARKET_DATA_FEED
             slippage_bps = 15.0
+            publish_outputs = False
 
             options_start = 2
 
@@ -238,7 +239,8 @@ def main() -> int:
                     "fibonacci-paper [YYYY-MM-DD] "
                     "[--output FILE] "
                     "[--feed iex|sip] "
-                    "[--slippage-bps NUMBER]"
+                    "[--slippage-bps NUMBER] "
+                    "[--publish yes|no]"
                 )
                 return 2
 
@@ -273,6 +275,24 @@ def main() -> int:
                         )
                         return 2
 
+                elif option == "--publish":
+                    normalized = value.strip().lower()
+
+                    if normalized not in {
+                        "yes",
+                        "no",
+                        "true",
+                        "false",
+                    }:
+                        print(
+                            "--publish must be yes or no."
+                        )
+                        return 2
+
+                    publish_outputs = (
+                        normalized in {"yes", "true"}
+                    )
+
                 else:
                     print(
                         "Usage: python main.py "
@@ -288,7 +308,8 @@ def main() -> int:
                 output_path=output_path,
                 data_feed=data_feed,
                 slippage_bps=slippage_bps,
-            )
+                            publish_outputs=publish_outputs,
+)
 
         elif mode == "fibonacci-retracement":
             if len(sys.argv) < 4:
