@@ -2039,26 +2039,70 @@ class TradingBot:
             f"Unsupported active strategy: {ACTIVE_STRATEGY}"
         )
 
-    def run_strategy_and_write(
-            self,
-            date_str: str | None = None,
-    ) -> None:
-        if date_str is None:
-            eastern = ZoneInfo("America/New_York")
-            date_str = datetime.now(eastern).strftime(
-                "%Y-%m-%d"
-            )
-
-        print()
-        print(f"Running strategy for {date_str}...")
-
-        self.calculate_strategy(date_str)
-
-        invest_symbols = [
+    def current_invest_symbols(self) -> list[str]:
+        """
+        Return the symbols currently approved by the active
+        strategy for paper/preview handling.
+        """
+        return [
             stock.symbol
             for stock in self.stocks.values()
             if stock.signal == "INVEST"
         ]
+
+    def current_signal_signature(
+            self,
+    ) -> tuple[tuple[object, ...], ...]:
+        """
+        Create a stable representation of current INVEST signals.
+
+        The Fibonacci monitor uses this to avoid duplicate Sheets
+        writes, Webull previews, and Cloudflare updates.
+        """
+        return tuple(
+            sorted(
+                (
+                    stock.symbol,
+                    stock.strategy_name,
+                    stock.signal,
+                    stock.limit_buy,
+                    stock.limit_sell,
+                    stock.trading_stop_loss,
+                    stock.confirmation_time,
+                )
+                for stock in self.stocks.values()
+                if stock.signal == "INVEST"
+            )
+        )
+
+    def evaluate_active_strategy(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> list[str]:
+        """
+        Evaluate the configured strategy without writing external
+        outputs.
+        """
+        print()
+        print(f"Running strategy for {date_str}...")
+
+        if (
+            evaluation_end is None
+            and data_feed == MARKET_DATA_FEED
+        ):
+            # Preserve compatibility with the original one-argument
+            # strategy interface and existing controlled tests.
+            self.calculate_strategy(date_str)
+        else:
+            self.calculate_strategy(
+                date_str=date_str,
+                evaluation_end=evaluation_end,
+                data_feed=data_feed,
+            )
+
+        invest_symbols = self.current_invest_symbols()
 
         print(
             "INVEST signals:",
@@ -2067,25 +2111,17 @@ class TradingBot:
             else "None",
         )
 
-        self.initialise_sheets()
+        return invest_symbols
 
-        write_errors = []
+    def prepare_webull_previews(
+            self,
+    ) -> list[dict]:
+        """
+        Build Webull previews for current INVEST signals.
 
-        try:
-            self.sheets.write_strategy_results(
-                date_str=date_str,
-                stocks=self.stocks,
-            )
-
-        except Exception as error:
-            write_errors.append(
-                f"Invest sheet: {error}"
-            )
-            print(
-                "Invest sheet write failed. "
-                f"Error: {error}"
-            )
-
+        This method never submits, places, cancels, or replaces
+        an order.
+        """
         print()
         print("Preparing Webull order previews...")
 
@@ -2131,20 +2167,58 @@ class TradingBot:
                         f"{preview.get('error', 'Unknown error')}"
                     )
 
+            return preview_results
+
         except Exception as error:
             print(
                 "Webull preview preparation failed. "
-                "Strategy and Sheets results were preserved."
+                "Strategy results were preserved."
             )
             print(f"Webull preview error: {error}")
+            return []
 
+    def publish_current_strategy_results(
+            self,
+            date_str: str,
+            initialise_sheets: bool = True,
+    ) -> None:
+        """
+        Write current strategy state to Google Sheets and prepare
+        non-submitted Webull previews.
+
+        Workbook finalisation is intentionally separate.
+        """
+        if initialise_sheets:
+            self.initialise_sheets()
+
+        if self.sheets is None:
+            raise RuntimeError(
+                "Google Sheets was not initialised."
+            )
+
+        write_errors: list[str] = []
+
+        try:
+            self.sheets.write_strategy_results(
+                date_str=date_str,
+                stocks=self.stocks,
+            )
+        except Exception as error:
+            write_errors.append(
+                f"Invest sheet: {error}"
+            )
+            print(
+                "Invest sheet write failed. "
+                f"Error: {error}"
+            )
+
+        self.prepare_webull_previews()
 
         try:
             self.sheets.write_orders(
                 date_str=date_str,
                 stocks=self.stocks,
             )
-
         except Exception as error:
             write_errors.append(
                 f"Orders sheet: {error}"
@@ -2160,6 +2234,20 @@ class TradingBot:
                 + " | ".join(write_errors)
             )
 
+        print("Current strategy results written successfully.")
+
+    def finalise_strategy_workbook(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Finalise the daily workbook once after monitoring ends.
+        """
+        if self.sheets is None:
+            raise RuntimeError(
+                "Google Sheets was not initialised."
+            )
+
         try:
             self.sheets.finalise_daily_workbook(
                 date_str=date_str,
@@ -2170,8 +2258,38 @@ class TradingBot:
                 f"failed: {error}"
             )
 
-        print("Strategy results written successfully.")
+    def run_strategy_and_write(
+            self,
+            date_str: str | None = None,
+            evaluation_end: datetime | None = None,
+            finalise: bool = True,
+    ) -> None:
+        """
+        Compatibility workflow for one strategy evaluation.
 
+        Fibonacci monitoring will call the smaller methods directly
+        so repeated evaluation does not repeatedly finalise the
+        workbook.
+        """
+        if date_str is None:
+            eastern = ZoneInfo("America/New_York")
+            date_str = datetime.now(eastern).strftime(
+                "%Y-%m-%d"
+            )
+
+        self.evaluate_active_strategy(
+            date_str=date_str,
+            evaluation_end=evaluation_end,
+        )
+
+        self.publish_current_strategy_results(
+            date_str=date_str,
+        )
+
+        if finalise:
+            self.finalise_strategy_workbook(
+                date_str=date_str,
+            )
 
     def run_production(self) -> None:
         eastern = ZoneInfo("America/New_York")
