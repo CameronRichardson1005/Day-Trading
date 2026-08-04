@@ -30,6 +30,9 @@ from .backtest import (
 from .config import (
     ACTIVE_STRATEGY,
     CANDIDATE_TICKERS,
+    FIBONACCI_MONITOR_CUTOFF,
+    FIBONACCI_MONITOR_INTERVAL_SECONDS,
+    FIBONACCI_MONITOR_START,
     FIBONACCI_STRATEGY_NAME,
     MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
@@ -2290,6 +2293,220 @@ class TradingBot:
             self.finalise_strategy_workbook(
                 date_str=date_str,
             )
+
+    @staticmethod
+    def _session_clock(
+            date_value,
+            clock_value: str,
+            timezone,
+    ) -> datetime:
+        """
+        Build one timezone-aware session timestamp from HH:MM.
+        """
+        parsed = datetime.strptime(
+            clock_value,
+            "%H:%M",
+        ).time()
+
+        return datetime.combine(
+            date_value,
+            parsed,
+            tzinfo=timezone,
+        )
+
+    def run_fibonacci_monitor(
+            self,
+            date_str: str,
+            write_sheets: bool = True,
+            publish_dashboard: bool = True,
+            now_fn=None,
+            sleep_fn=None,
+    ) -> None:
+        """
+        Monitor the active Fibonacci strategy using only completed
+        one-minute bars.
+
+        External outputs are refreshed only when the INVEST signal
+        signature changes. The workbook is finalised once when the
+        monitoring window ends.
+
+        No order is submitted.
+        """
+        if ACTIVE_STRATEGY != FIBONACCI_STRATEGY_NAME:
+            raise RuntimeError(
+                "Fibonacci monitoring requires "
+                "ACTIVE_STRATEGY=FIBONACCI_61_8."
+            )
+
+        eastern = ZoneInfo("America/New_York")
+        now_fn = now_fn or (
+            lambda: datetime.now(eastern)
+        )
+        sleep_fn = sleep_fn or time_module.sleep
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        monitor_start = self._session_clock(
+            trading_date,
+            FIBONACCI_MONITOR_START,
+            eastern,
+        )
+        monitor_cutoff = self._session_clock(
+            trading_date,
+            FIBONACCI_MONITOR_CUTOFF,
+            eastern,
+        )
+
+        print()
+        print("===================================")
+        print(" Fibonacci Live Monitor")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(
+            "Monitoring window:",
+            FIBONACCI_MONITOR_START,
+            "to",
+            FIBONACCI_MONITOR_CUTOFF,
+            "New York time",
+        )
+        print("PAPER/PREVIEW ONLY — NOT SUBMITTED")
+
+        now = now_fn()
+
+        if now < monitor_start:
+            wait_seconds = (
+                monitor_start - now
+            ).total_seconds()
+
+            print(
+                "Waiting for Fibonacci monitoring to begin "
+                f"at {FIBONACCI_MONITOR_START} ET..."
+            )
+            sleep_fn(wait_seconds)
+            now = now_fn()
+
+        if now >= monitor_cutoff:
+            print(
+                "Fibonacci monitoring cutoff has already passed."
+            )
+            return
+
+        last_signature = None
+
+        while True:
+            now = now_fn()
+
+            if now >= monitor_cutoff:
+                break
+
+            # Alpaca's end timestamp acts as the completed-bar
+            # boundary. Seconds and microseconds are removed so
+            # the currently forming minute is never evaluated.
+            evaluation_end = now.replace(
+                second=0,
+                microsecond=0,
+            )
+
+            self.evaluate_active_strategy(
+                date_str=date_str,
+                evaluation_end=evaluation_end,
+                data_feed=MARKET_DATA_FEED,
+            )
+
+            signature = self.current_signal_signature()
+
+            if signature != last_signature:
+                print(
+                    "Active Fibonacci signal state changed."
+                )
+
+                if write_sheets:
+                    self.publish_current_strategy_results(
+                        date_str=date_str,
+                        initialise_sheets=False,
+                    )
+                else:
+                    print(
+                        "DRY-RUN MODE: Sheets and Webull "
+                        "preview publishing skipped."
+                    )
+
+                if publish_dashboard:
+                    processed_bars = {
+                        symbol: (
+                            stock.green_minutes
+                            + stock.red_minutes
+                        )
+                        for symbol, stock in self.stocks.items()
+                    }
+
+                    self._publish_dashboard_session(
+                        date_str=date_str,
+                        source="LIVE_FIBONACCI",
+                        processed_bars=processed_bars,
+                        data_feed=MARKET_DATA_FEED,
+                    )
+                else:
+                    print(
+                        "DRY-RUN MODE: Cloudflare dashboard "
+                        "publishing skipped."
+                    )
+
+                last_signature = signature
+            else:
+                print(
+                    "No Fibonacci signal change. "
+                    "External outputs were not rewritten."
+                )
+
+            sleep_fn(
+                FIBONACCI_MONITOR_INTERVAL_SECONDS
+            )
+
+        print()
+        print("Running final Fibonacci evaluation...")
+
+        self.evaluate_active_strategy(
+            date_str=date_str,
+            evaluation_end=monitor_cutoff,
+            data_feed=MARKET_DATA_FEED,
+        )
+
+        final_signature = self.current_signal_signature()
+
+        if final_signature != last_signature:
+            if write_sheets:
+                self.publish_current_strategy_results(
+                    date_str=date_str,
+                    initialise_sheets=False,
+                )
+
+            if publish_dashboard:
+                processed_bars = {
+                    symbol: (
+                        stock.green_minutes
+                        + stock.red_minutes
+                    )
+                    for symbol, stock in self.stocks.items()
+                }
+
+                self._publish_dashboard_session(
+                    date_str=date_str,
+                    source="LIVE_FIBONACCI_FINAL",
+                    processed_bars=processed_bars,
+                    data_feed=MARKET_DATA_FEED,
+                )
+
+        if write_sheets:
+            self.finalise_strategy_workbook(
+                date_str=date_str,
+            )
+
+        print("Fibonacci monitoring completed.")
+        print("No real orders were submitted.")
 
     def run_production(self) -> None:
         eastern = ZoneInfo("America/New_York")
