@@ -1197,6 +1197,7 @@ class TradingBot:
         data_feed: str = MARKET_DATA_FEED,
         slippage_bps: float = 15.0,
         publish_outputs: bool = False,
+        publish_dashboard_only: bool = False,
     ) -> list:
         """
         Evaluate the Fibonacci paper rule for one session.
@@ -1206,8 +1207,12 @@ class TradingBot:
 
         When publish_outputs is explicitly enabled, it may also
         write only to the dedicated Fibonacci Google Sheets and
-        publish the read-only Cloudflare dashboard. It never calls
-        Webull, creates previews, or submits orders.
+        publish the read-only Cloudflare dashboard.
+
+        When publish_dashboard_only is enabled, it publishes a
+        historical REPLAY session without writing Google Sheets.
+
+        It never calls Webull, creates previews, or submits orders.
         """
         data_feed = data_feed.strip().lower()
 
@@ -1301,6 +1306,14 @@ class TradingBot:
             print(
                 "Webull, previews, and production orders "
                 "remain disabled."
+            )
+        elif publish_dashboard_only:
+            print(
+                "Historical dashboard publishing enabled."
+            )
+            print(
+                "Google Sheets, Webull, previews, and "
+                "production orders remain disabled."
             )
         else:
             print(
@@ -1440,11 +1453,16 @@ class TradingBot:
         print()
         print(f"Paper ledger: {ledger_path}")
 
-        if publish_outputs:
+        if publish_outputs or publish_dashboard_only:
             print()
             print(
-                "Preparing dedicated Fibonacci Sheets and "
-                "dashboard output..."
+                (
+                    "Preparing dedicated Fibonacci Sheets and "
+                    "dashboard output..."
+                    if publish_outputs
+                    else "Preparing historical Fibonacci "
+                    "dashboard output..."
+                )
             )
 
             processed_bars: dict[str, int] = {}
@@ -1524,43 +1542,288 @@ class TradingBot:
                     slippage_bps=slippage_bps,
                 )
 
-            self.initialise_sheets(
-                write_sheets=True,
-            )
+            records_by_symbol = {}
 
-            if self.sheets is None:
-                raise RuntimeError(
-                    "Google Sheets was not initialised."
+            for record in paper_records:
+                records_by_symbol.setdefault(
+                    record.symbol,
+                    [],
+                ).append(record)
+
+            for symbol, stock in self.stocks.items():
+                if stock.signal != "INVEST":
+                    stock.outcome = None
+                    continue
+
+                symbol_records = records_by_symbol.get(
+                    symbol,
+                    [],
                 )
 
-            self.sheets.write_strategy_results(
-                date_str=date_str,
-                stocks=self.stocks,
-                sheet_name="Fibonacci Invest",
-            )
+                if not symbol_records:
+                    stock.outcome = None
+                    continue
 
-            # This directly reconciles the dedicated Fibonacci
-            # order sheet. Webull preview generation is deliberately
-            # not called.
-            self.sheets.write_orders(
-                date_str=date_str,
-                stocks=self.stocks,
-                sheet_name="Fibonacci Orders",
+                record = sorted(
+                    symbol_records,
+                    key=lambda item: (
+                        str(
+                            getattr(
+                                item,
+                                "confirmation_time",
+                                "",
+                            )
+                        )
+                    ),
+                )[0]
+
+                status = str(record.outcome).upper()
+
+                if status not in {
+                    "WIN",
+                    "LOSS",
+                    "NO ENTRY",
+                    "STILL OPEN",
+                }:
+                    stock.outcome = None
+                    continue
+
+                outcome = {
+                    "status": status,
+                    "detail": (
+                        "Historical Fibonacci paper outcome. "
+                        "PAPER ONLY — NOT SUBMITTED."
+                    ),
+                }
+
+                confirmation_time = getattr(
+                    record,
+                    "confirmation_time",
+                    None,
+                )
+
+                if confirmation_time:
+                    outcome["entryTime"] = str(
+                        confirmation_time
+                    )
+
+                entry_price = getattr(
+                    record,
+                    "entry_price",
+                    None,
+                )
+
+                if entry_price is not None:
+                    outcome["entryPrice"] = float(
+                        entry_price
+                    )
+
+                exit_time = getattr(
+                    record,
+                    "exit_time",
+                    None,
+                )
+
+                if exit_time:
+                    outcome["exitTime"] = str(exit_time)
+
+                exit_price = getattr(
+                    record,
+                    "exit_price",
+                    None,
+                )
+
+                if exit_price is not None:
+                    outcome["exitPrice"] = float(
+                        exit_price
+                    )
+
+                net_return_pct = getattr(
+                    record,
+                    "net_return_pct",
+                    None,
+                )
+
+                if net_return_pct is not None:
+                    outcome["returnPct"] = float(
+                        net_return_pct
+                    )
+
+                    if entry_price is not None:
+                        outcome["pnlPerShare"] = round(
+                            float(entry_price)
+                            * float(net_return_pct)
+                            / 100.0,
+                            6,
+                        )
+
+                stock.outcome = outcome
+
+            if publish_outputs:
+                self.initialise_sheets(
+                    write_sheets=True,
+                )
+
+                if self.sheets is None:
+                    raise RuntimeError(
+                        "Google Sheets was not initialised."
+                    )
+
+                self.sheets.write_strategy_results(
+                    date_str=date_str,
+                    stocks=self.stocks,
+                    sheet_name="Fibonacci Invest",
+                )
+
+                # This directly reconciles the dedicated
+                # Fibonacci order sheet. Webull preview
+                # generation is deliberately not called.
+                self.sheets.write_orders(
+                    date_str=date_str,
+                    stocks=self.stocks,
+                    sheet_name="Fibonacci Orders",
+                )
+
+            dashboard_source = (
+                "LIVE_FIBONACCI_FINAL"
+                if publish_outputs
+                else "REPLAY"
             )
 
             self._publish_dashboard_session(
                 date_str=date_str,
-                source="LIVE_FIBONACCI_FINAL",
+                source=dashboard_source,
                 processed_bars=processed_bars,
                 data_feed=data_feed,
             )
 
-            print(
-                "Fibonacci Sheets and dashboard published."
-            )
+            if publish_outputs:
+                print(
+                    "Fibonacci Sheets and dashboard published."
+                )
+            else:
+                print(
+                    "Historical Fibonacci dashboard session "
+                    "published."
+                )
+
             print("PAPER ONLY — NOT SUBMITTED")
 
         return paper_records
+
+    def run_dashboard_backfill(
+            self,
+            start_date: str,
+            end_date: str,
+            data_feed: str = MARKET_DATA_FEED,
+            slippage_bps: float = 15.0,
+    ) -> None:
+        """
+        Publish historical Fibonacci sessions to Cloudflare.
+
+        Google Sheets, Webull previews, and all broker-order
+        workflows remain disabled.
+        """
+        try:
+            start = datetime.strptime(
+                start_date,
+                "%Y-%m-%d",
+            ).date()
+            end = datetime.strptime(
+                end_date,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Backfill dates must use YYYY-MM-DD."
+            ) from error
+
+        if end < start:
+            raise ValueError(
+                "Backfill end date cannot precede "
+                "the start date."
+            )
+
+        eastern = ZoneInfo("America/New_York")
+        today = datetime.now(eastern).date()
+
+        if end >= today:
+            raise ValueError(
+                "Dashboard backfill is historical only. "
+                "The end date must be before today."
+            )
+
+        data_feed = data_feed.strip().lower()
+
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Backfill feed must be 'iex' or 'sip'."
+            )
+
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+
+        dates = weekday_dates(start, end)
+
+        if not dates:
+            raise ValueError(
+                "Backfill range contains no weekdays."
+            )
+
+        print()
+        print("===================================")
+        print(" Fibonacci Dashboard Backfill")
+        print("===================================")
+        print(
+            f"Date range: {start_date} to {end_date}"
+        )
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            f"Modeled slippage: "
+            f"{slippage_bps:.1f} bps"
+        )
+        print(
+            "Dashboard only — Google Sheets, Webull, "
+            "previews, and orders are disabled."
+        )
+        print("PAPER ONLY — NOT SUBMITTED")
+
+        uploaded = 0
+        failed = 0
+
+        for trading_date in dates:
+            date_str = trading_date.isoformat()
+
+            print()
+            print(f"Backfilling {date_str}...")
+
+            try:
+                self.run_fibonacci_paper(
+                    date_str=date_str,
+                    data_feed=data_feed,
+                    slippage_bps=slippage_bps,
+                    publish_outputs=False,
+                    publish_dashboard_only=True,
+                )
+
+                uploaded += 1
+                print(f"{date_str}: UPLOADED")
+
+            except Exception as error:
+                failed += 1
+                print(
+                    f"{date_str}: FAILED — {error}"
+                )
+
+        print()
+        print("===================================")
+        print(" Backfill Summary")
+        print("===================================")
+        print(f"Uploaded: {uploaded}")
+        print(f"Failed: {failed}")
+        print("No real orders were submitted.")
 
     def run_fibonacci_retracement_research(
         self,

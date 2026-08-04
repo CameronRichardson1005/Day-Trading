@@ -179,6 +179,39 @@ def main() -> int:
                 data_feed=data_feed,
             )
 
+        elif mode == "dashboard-backfill":
+            if len(sys.argv) not in {4, 6}:
+                print(
+                    "Usage: python main.py dashboard-backfill "
+                    "START_DATE END_DATE [--feed iex|sip]"
+                )
+                return 2
+
+            start_date = sys.argv[2]
+            end_date = sys.argv[3]
+            data_feed = MARKET_DATA_FEED
+
+            if len(sys.argv) == 6:
+                if sys.argv[4] != "--feed":
+                    print(
+                        "Usage: python main.py "
+                        "dashboard-backfill START_DATE "
+                        "END_DATE [--feed iex|sip]"
+                    )
+                    return 2
+
+                data_feed = sys.argv[5].lower()
+
+                if data_feed not in {"iex", "sip"}:
+                    print("Feed must be 'iex' or 'sip'.")
+                    return 2
+
+            bot.run_dashboard_backfill(
+                start_date=start_date,
+                end_date=end_date,
+                data_feed=data_feed,
+            )
+
         elif mode == "fibonacci-paper-status":
             if len(sys.argv) != 2:
                 print(
