@@ -19,6 +19,7 @@ from .fibonacci_retracement import (
     FibonacciRetracementReport,
     analyse_symbol_day,
 )
+from .fibonacci_strategy import Fibonacci618Strategy
 
 from .backtest import (
     BacktestReport,
@@ -27,7 +28,10 @@ from .backtest import (
     weekday_dates,
 )
 from .config import (
+    ACTIVE_STRATEGY,
     CANDIDATE_TICKERS,
+    FIBONACCI_STRATEGY_NAME,
+    MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
     TICKERS,
 )
@@ -51,7 +55,13 @@ class TradingBot:
         self.symbols_csv = ",".join(self.stocks.keys())
 
         self.alpaca = AlpacaClient()
+        # Preserved manipulation engine for historical replay,
+        # comparison, and audit work.
         self.strategy = ManipulationStrategy()
+
+        # Separate active paper/preview Fibonacci adapter.
+        self.fibonacci_strategy = Fibonacci618Strategy()
+
         self.scanner = StockScanner(
             current_symbols=TICKERS,
         )
@@ -1815,10 +1825,16 @@ class TradingBot:
         print()
         print("Strategy test completed.")
 
-    def calculate_strategy(
+    def _calculate_manipulation_strategy(
             self,
             date_str: str,
     ) -> None:
+        """
+        Preserved manipulation strategy path.
+
+        Retained for historical replay, comparison, and audit
+        purposes. It is not deleted when Fibonacci becomes active.
+        """
         opening_bars = self.alpaca.get_opening_15min_bars(
             symbols_csv=self.symbols_csv,
             date_str=date_str,
@@ -1835,13 +1851,18 @@ class TradingBot:
 
             stock.opening_bar = opening_bar
             stock.atr = atr
+            stock.strategy_name = MANIPULATION_STRATEGY_NAME
+            stock.strategy_status = (
+                "PRESERVED HISTORICAL STRATEGY"
+            )
 
             if opening_bar is None or atr is None:
                 stock.signal = "NO INVEST"
 
                 print(
-                    f"{symbol}: strategy skipped because "
-                    "valid opening-bar or ATR data was unavailable."
+                    f"{symbol}: manipulation strategy skipped "
+                    "because valid opening-bar or ATR data "
+                    "was unavailable."
                 )
                 continue
 
@@ -1856,9 +1877,167 @@ class TradingBot:
                 stock.signal = "NO INVEST"
 
                 print(
-                    f"{symbol}: strategy evaluation failed: "
-                    f"{error}"
+                    f"{symbol}: manipulation strategy "
+                    f"evaluation failed: {error}"
                 )
+
+    def _calculate_fibonacci_strategy(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Evaluate Fibonacci using only bars available through
+        evaluation_end.
+
+        For today's session, evaluation_end is always clamped to
+        the current New York time to prevent future-bar look-ahead.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        now_eastern = datetime.now(eastern)
+
+        session_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        )
+
+        session_close = datetime.combine(
+            trading_date,
+            time(hour=16),
+            tzinfo=eastern,
+        )
+
+        if evaluation_end is None:
+            if trading_date == now_eastern.date():
+                evaluation_end_eastern = now_eastern
+            else:
+                evaluation_end_eastern = session_close
+        elif evaluation_end.tzinfo is None:
+            evaluation_end_eastern = evaluation_end.replace(
+                tzinfo=eastern
+            )
+        else:
+            evaluation_end_eastern = (
+                evaluation_end.astimezone(eastern)
+            )
+
+        evaluation_end_eastern = min(
+            evaluation_end_eastern,
+            session_close,
+        )
+
+        if trading_date == now_eastern.date():
+            evaluation_end_eastern = min(
+                evaluation_end_eastern,
+                now_eastern,
+            )
+
+        opening_bars = self.alpaca.get_opening_15min_bars(
+            symbols_csv=self.symbols_csv,
+            date_str=date_str,
+            feed=data_feed,
+        )
+
+        atrs = self.alpaca.get_previous_day_ranges_all(
+            symbols_csv=self.symbols_csv,
+            date_str=date_str,
+            feed=data_feed,
+        )
+
+        if evaluation_end_eastern <= session_start:
+            bars_by_symbol = {
+                symbol: []
+                for symbol in self.stocks
+            }
+        else:
+            bars_by_symbol = (
+                self.alpaca.get_historical_1min_bars(
+                    symbols_csv=self.symbols_csv,
+                    start_iso=session_start.astimezone(
+                        utc
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    end_iso=evaluation_end_eastern.astimezone(
+                        utc
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    feed=data_feed,
+                )
+            )
+
+        print(
+            "Fibonacci evaluation cutoff:",
+            evaluation_end_eastern.strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            ),
+        )
+
+        for symbol, stock in self.stocks.items():
+            stock.opening_bar = opening_bars.get(symbol)
+            stock.atr = atrs.get(symbol)
+
+            try:
+                self.fibonacci_strategy.evaluate(
+                    stock=stock,
+                    date_str=date_str,
+                    bars=bars_by_symbol.get(symbol, []),
+                    atr=stock.atr,
+                    data_feed=data_feed,
+                )
+
+            except Exception as error:
+                stock.signal = "NO INVEST"
+                stock.strategy_name = (
+                    FIBONACCI_STRATEGY_NAME
+                )
+                stock.strategy_status = (
+                    "ACTIVE PAPER/PREVIEW — NOT SUBMITTED"
+                )
+                stock.strategy_detail = str(error)
+                stock.strategy_rejection_reason = (
+                    "STRATEGY_EVALUATION_FAILED"
+                )
+
+                print(
+                    f"{symbol}: Fibonacci strategy "
+                    f"evaluation failed: {error}"
+                )
+
+    def calculate_strategy(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Route active signals without deleting either strategy.
+        """
+        print(f"Configured active strategy: {ACTIVE_STRATEGY}")
+
+        if ACTIVE_STRATEGY == FIBONACCI_STRATEGY_NAME:
+            self._calculate_fibonacci_strategy(
+                date_str=date_str,
+                evaluation_end=evaluation_end,
+                data_feed=data_feed,
+            )
+            return
+
+        if ACTIVE_STRATEGY == MANIPULATION_STRATEGY_NAME:
+            self._calculate_manipulation_strategy(
+                date_str=date_str,
+            )
+            return
+
+        raise RuntimeError(
+            f"Unsupported active strategy: {ACTIVE_STRATEGY}"
+        )
 
     def run_strategy_and_write(
             self,
