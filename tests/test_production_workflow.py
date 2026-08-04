@@ -114,7 +114,6 @@ def test_before_open_waits_then_runs_full_workflow(
     assert events == [
         "sleep:1800.0",
         "tracker",
-        "strategy:2026-07-27",
     ]
 
 
@@ -159,8 +158,6 @@ def test_during_opening_window_tracks_then_waits(
 
     assert events == [
         "tracker",
-        "sleep:5.0",
-        "strategy:2026-07-27",
     ]
 
 
@@ -299,3 +296,58 @@ def test_tracking_failure_prevents_strategy_write(
         match="Tracker failed",
     ):
         bot.run_production()
+
+
+def test_fibonacci_after_opening_starts_monitor(
+        monkeypatch,
+):
+    events = []
+    bot = object.__new__(TradingBot)
+
+    install_clock(
+        monkeypatch,
+        [
+            datetime(
+                2026,
+                7,
+                27,
+                9,
+                50,
+                tzinfo=EASTERN,
+            ),
+        ],
+    )
+
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "FIBONACCI_61_8",
+    )
+
+    bot.refresh_symbols_for_date = (
+        lambda date_str: events.append(
+            f"refresh:{date_str}"
+        )
+    )
+    bot.initialise_sheets = (
+        lambda: events.append("sheets")
+    )
+    bot.run_fibonacci_monitor = (
+        lambda **kwargs: events.append(
+            f"monitor:{kwargs['date_str']}"
+        )
+    )
+    bot.run_live_tracker = (
+        lambda: events.append("tracker")
+    )
+    bot.run_strategy_and_write = (
+        lambda **kwargs: events.append("manipulation")
+    )
+
+    bot.run_production()
+
+    assert events == [
+        "refresh:2026-07-27",
+        "sheets",
+        "monitor:2026-07-27",
+    ]

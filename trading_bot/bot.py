@@ -665,8 +665,22 @@ class TradingBot:
             for symbol, stock in getattr(self, "stocks", {}).items()
         }
 
+        if ACTIVE_STRATEGY == FIBONACCI_STRATEGY_NAME:
+            print()
+            print(
+                "Opening tracking completed. "
+                "Starting Fibonacci monitoring..."
+            )
+
+            self.run_fibonacci_monitor(
+                date_str=date_str,
+                write_sheets=write_sheets,
+                publish_dashboard=publish_dashboard,
+            )
+            return
+
         print()
-        print("Calculating live strategy results...")
+        print("Calculating preserved manipulation results...")
 
         try:
             if write_sheets:
@@ -691,12 +705,13 @@ class TradingBot:
         if publish_dashboard:
             self._publish_dashboard_session(
                 date_str=date_str,
-                source="LIVE",
+                source="LIVE_MANIPULATION",
                 processed_bars=processed_bars,
             )
         else:
             print(
-                "DRY-RUN MODE: Dashboard upload was skipped."
+                "DRY-RUN MODE: Cloudflare dashboard "
+                "upload was skipped."
             )
 
     def _publish_dashboard_session(
@@ -2534,7 +2549,12 @@ class TradingBot:
 
         production_cutoff = datetime.combine(
             now.date(),
-            time(hour=10),
+            (
+                time(hour=11)
+                if ACTIVE_STRATEGY
+                == FIBONACCI_STRATEGY_NAME
+                else time(hour=10)
+            ),
             tzinfo=eastern,
         )
 
@@ -2571,12 +2591,31 @@ class TradingBot:
         elif now >= strategy_time:
             print()
             print("The opening tracking window has ended.")
-            print("Skipping live tracking.")
-            print("Running the strategy immediately...")
+            print("Skipping the opening tracker.")
 
-            self.run_strategy_and_write(
-                date_str=date_str
-            )
+            if ACTIVE_STRATEGY == FIBONACCI_STRATEGY_NAME:
+                print(
+                    "Starting Fibonacci monitoring from "
+                    "the current completed minute..."
+                )
+
+                self.refresh_symbols_for_date(date_str)
+                self.initialise_sheets()
+
+                self.run_fibonacci_monitor(
+                    date_str=date_str,
+                    write_sheets=True,
+                    publish_dashboard=True,
+                )
+            else:
+                print(
+                    "Running the preserved manipulation "
+                    "strategy immediately..."
+                )
+
+                self.run_strategy_and_write(
+                    date_str=date_str
+                )
 
             print()
             print("Production workflow completed.")
@@ -2588,29 +2627,6 @@ class TradingBot:
             print("Starting the tracker now...")
 
         self.run_live_tracker()
-
-        now = datetime.now(eastern)
-
-        remaining_seconds = (
-                strategy_time - now
-        ).total_seconds()
-
-        if remaining_seconds > 0:
-            print()
-            print(
-                "Waiting for Alpaca to complete "
-                "the opening 15-minute candle..."
-            )
-
-            time_module.sleep(remaining_seconds)
-
-        print()
-        print("Opening tracking window completed.")
-        print("Calculating strategy signals...")
-
-        self.run_strategy_and_write(
-            date_str=date_str
-        )
 
         print()
         print("Production workflow completed.")
