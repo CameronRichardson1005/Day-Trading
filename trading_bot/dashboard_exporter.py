@@ -262,6 +262,11 @@ class DashboardExporter:
                 "tradingStopLoss": "tradingStopLoss",
                 "riskPerShare": "riskPerShare",
                 "plannedRisk": "plannedRisk",
+                "estimatedPositionValue": (
+                    "estimatedPositionValue"
+                ),
+                "maxPositionValue": "maxPositionValue",
+                "sizingConstraint": "sizingConstraint",
                 "estimatedCost": "estimatedCost",
                 "estimatedTransactionFee": (
                     "estimatedTransactionFee"

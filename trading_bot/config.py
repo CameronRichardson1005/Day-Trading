@@ -137,6 +137,13 @@ WEBULL_PREVIEW_MAX_SHARES = int(
     )
 )
 
+WEBULL_PREVIEW_MAX_POSITION_VALUE = float(
+    os.getenv(
+        "WEBULL_PREVIEW_MAX_POSITION_VALUE",
+        "5000",
+    )
+)
+
 if WEBULL_PREVIEW_RISK_DOLLARS <= 0:
     raise RuntimeError(
         "WEBULL_PREVIEW_RISK_DOLLARS must be positive."
@@ -145,4 +152,9 @@ if WEBULL_PREVIEW_RISK_DOLLARS <= 0:
 if WEBULL_PREVIEW_MAX_SHARES <= 0:
     raise RuntimeError(
         "WEBULL_PREVIEW_MAX_SHARES must be positive."
+    )
+
+if WEBULL_PREVIEW_MAX_POSITION_VALUE <= 0:
+    raise RuntimeError(
+        "WEBULL_PREVIEW_MAX_POSITION_VALUE must be positive."
     )

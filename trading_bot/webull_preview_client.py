@@ -11,6 +11,7 @@ from webull.trade.trade_client import TradeClient
 from .config import (
     WEBULL_APP_KEY,
     WEBULL_APP_SECRET,
+    WEBULL_PREVIEW_MAX_POSITION_VALUE,
     WEBULL_PREVIEW_MAX_SHARES,
     WEBULL_PREVIEW_RISK_DOLLARS,
 )
@@ -26,6 +27,9 @@ class WebullPreviewRequest:
     trading_stop_loss: float
     risk_per_share: float
     planned_risk: float
+    estimated_position_value: float
+    max_position_value: float
+    sizing_constraint: str
     client_order_id: str
 
 
@@ -148,17 +152,41 @@ class WebullPreviewClient:
                 f"{stock.symbol} has invalid risk per share."
             )
 
-        quantity = math.floor(
+        risk_based_quantity = math.floor(
             WEBULL_PREVIEW_RISK_DOLLARS
             / risk_per_share
         )
 
-        quantity = min(
-            quantity,
-            WEBULL_PREVIEW_MAX_SHARES,
+        position_value_quantity = math.floor(
+            WEBULL_PREVIEW_MAX_POSITION_VALUE
+            / limit_price
+        )
+
+        quantity_limits = {
+            "RISK_BUDGET": risk_based_quantity,
+            "MAX_SHARES": WEBULL_PREVIEW_MAX_SHARES,
+            "POSITION_VALUE": position_value_quantity,
+        }
+
+        quantity = min(quantity_limits.values())
+
+        limiting_constraints = [
+            name
+            for name, value in quantity_limits.items()
+            if value == quantity
+        ]
+
+        sizing_constraint = "+".join(
+            limiting_constraints
         )
 
         if quantity < 1:
+            if position_value_quantity < 1:
+                raise ValueError(
+                    f"{stock.symbol} limit-buy price exceeds "
+                    "the maximum position value."
+                )
+
             raise ValueError(
                 f"{stock.symbol} risk budget is too small "
                 "for one share."
@@ -181,6 +209,15 @@ class WebullPreviewClient:
                 quantity * risk_per_share,
                 2,
             ),
+            estimated_position_value=round(
+                quantity * limit_price,
+                2,
+            ),
+            max_position_value=round(
+                WEBULL_PREVIEW_MAX_POSITION_VALUE,
+                2,
+            ),
+            sizing_constraint=sizing_constraint,
             client_order_id=(
                 WebullPreviewClient
                 ._client_order_id(stock.symbol)
@@ -248,6 +285,15 @@ class WebullPreviewClient:
             ),
             "riskPerShare": request.risk_per_share,
             "plannedRisk": request.planned_risk,
+            "estimatedPositionValue": (
+                request.estimated_position_value
+            ),
+            "maxPositionValue": (
+                request.max_position_value
+            ),
+            "sizingConstraint": (
+                request.sizing_constraint
+            ),
             "estimatedCost": float(
                 result.get("estimated_cost", 0)
             ),

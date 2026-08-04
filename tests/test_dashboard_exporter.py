@@ -386,6 +386,9 @@ def test_invest_symbol_exports_webull_preview():
         "tradingStopLoss": 16.59,
         "riskPerShare": 0.11,
         "plannedRisk": 24.97,
+        "estimatedPositionValue": 3790.90,
+        "maxPositionValue": 5000.0,
+        "sizingConstraint": "RISK_BUDGET",
         "estimatedCost": 3790.90,
         "estimatedTransactionFee": 0.0,
         "currency": "USD",
@@ -404,6 +407,15 @@ def test_invest_symbol_exports_webull_preview():
     assert preview["status"] == "PREVIEW READY"
     assert preview["submitted"] is False
     assert preview["quantity"] == 227
+    assert (
+        preview["estimatedPositionValue"]
+        == 3790.90
+    )
+    assert preview["maxPositionValue"] == 5000.0
+    assert (
+        preview["sizingConstraint"]
+        == "RISK_BUDGET"
+    )
     assert preview["estimatedCost"] == 3790.90
     assert preview["estimatedTransactionFee"] == 0.0
 

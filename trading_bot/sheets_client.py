@@ -994,6 +994,9 @@ class SheetsClient:
             "Trading Stop Loss",
             "Webull Preview",
             "Quantity",
+            "Estimated Position Value",
+            "Maximum Position Value",
+            "Sizing Constraint",
             "Estimated Cost",
             "Estimated Fee",
             "Submitted",
@@ -1500,6 +1503,30 @@ class SheetsClient:
                     ),
                     (
                         stock.webull_preview.get(
+                            "estimatedPositionValue",
+                            "",
+                        )
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    (
+                        stock.webull_preview.get(
+                            "maxPositionValue",
+                            "",
+                        )
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    (
+                        stock.webull_preview.get(
+                            "sizingConstraint",
+                            "",
+                        )
+                        if stock.webull_preview
+                        else ""
+                    ),
+                    (
+                        stock.webull_preview.get(
                             "estimatedCost",
                             "",
                         )
@@ -1523,7 +1550,7 @@ class SheetsClient:
             columns=order_columns,
             date_str=date_str,
             replacement_rows=order_rows,
-            last_column="J",
+            last_column="M",
             sheet_name="Orders",
         )
 
