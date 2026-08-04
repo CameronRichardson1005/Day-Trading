@@ -10,6 +10,12 @@ from trading_bot.models import Stock
 def test_live_strategy_runs_before_dashboard(
         monkeypatch,
 ):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
     events = []
 
     class FrozenDateTime(RealDateTime):

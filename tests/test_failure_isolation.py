@@ -2,10 +2,19 @@ from types import SimpleNamespace
 
 import pytest
 
+import trading_bot.bot as bot_module
 from trading_bot.bot import TradingBot
 
 
-def test_ticker_failure_does_not_stop_remaining_tickers():
+def test_ticker_failure_does_not_stop_remaining_tickers(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
     events = []
     bot = object.__new__(TradingBot)
 

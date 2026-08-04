@@ -8,6 +8,14 @@ from trading_bot.bot import TradingBot
 EASTERN = ZoneInfo("America/New_York")
 
 
+def force_manipulation(monkeypatch):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
+
 def make_bot(events):
     bot = object.__new__(TradingBot)
 
@@ -42,6 +50,7 @@ def install_clock(monkeypatch, times):
 def test_weekend_stops_without_running_workflow(
     monkeypatch,
 ):
+    force_manipulation(monkeypatch)
     events = []
     bot = make_bot(events)
 
@@ -75,6 +84,7 @@ def test_weekend_stops_without_running_workflow(
 def test_before_open_waits_then_runs_full_workflow(
     monkeypatch,
 ):
+    force_manipulation(monkeypatch)
     events = []
     bot = make_bot(events)
 
@@ -120,6 +130,7 @@ def test_before_open_waits_then_runs_full_workflow(
 def test_during_opening_window_tracks_then_waits(
     monkeypatch,
 ):
+    force_manipulation(monkeypatch)
     events = []
     bot = make_bot(events)
 
@@ -164,6 +175,7 @@ def test_during_opening_window_tracks_then_waits(
 def test_after_opening_window_runs_strategy_immediately(
     monkeypatch,
 ):
+    force_manipulation(monkeypatch)
     events = []
     bot = make_bot(events)
 
@@ -199,6 +211,7 @@ def test_production_stops_after_cutoff(
         monkeypatch,
         capsys,
 ):
+    force_manipulation(monkeypatch)
     import trading_bot.bot as production_bot_module
 
     real_datetime = production_bot_module.datetime
@@ -252,6 +265,7 @@ def test_production_stops_after_cutoff(
 def test_tracking_failure_prevents_strategy_write(
         monkeypatch,
 ):
+    force_manipulation(monkeypatch)
     import pytest
     import trading_bot.bot as production_bot_module
 
