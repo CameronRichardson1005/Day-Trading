@@ -63,6 +63,12 @@ FIBONACCI_STRATEGY_NAME = "FIBONACCI_61_8"
 # Real broker submission remains intentionally unsupported.
 REAL_ORDER_SUBMISSION_ENABLED = False
 
+# Fibonacci needs post-opening minute bars to observe the
+# impulse, retracement, bullish confirmation, and breakout.
+FIBONACCI_MONITOR_START = "09:45"
+FIBONACCI_MONITOR_CUTOFF = "11:00"
+FIBONACCI_MONITOR_INTERVAL_SECONDS = 60
+
 TICKERS = [
     "BBAI",
     "OPEN",
@@ -102,11 +108,17 @@ STOP_BUFFER = 0.05
 DASHBOARD_URL = os.getenv(
     "DASHBOARD_URL",
     (
-        "https://trading-bot-dashboard."
-        "icy-grebe-0605.chatgpt.site"
+        "https://cameron-trading-desk."
+        "cameron-richardson.workers.dev"
         "/api/sessions/latest"
     ),
 ).strip()
+
+if "chatgpt.site" in DASHBOARD_URL.lower():
+    raise RuntimeError(
+        "DASHBOARD_URL must use the Cloudflare trading desk. "
+        "ChatGPT-hosted dashboard URLs are not supported."
+    )
 
 DASHBOARD_INGEST_KEY = os.getenv(
     "DASHBOARD_INGEST_KEY",
