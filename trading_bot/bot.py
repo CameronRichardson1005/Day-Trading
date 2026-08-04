@@ -714,6 +714,228 @@ class TradingBot:
                 "upload was skipped."
             )
 
+
+    def run_live_recovery(
+            self,
+            date_str: str,
+            write_sheets: bool = True,
+            publish_dashboard: bool = True,
+    ) -> None:
+        """
+        Recover a same-day Fibonacci monitoring session after the
+        opening tracker window has ended.
+
+        The normal live-mode time guards remain unchanged. Recovery
+        backfills 09:30-09:44 from the configured market-data feed,
+        keeps only symbols with complete opening data, and resumes
+        paper/preview Fibonacci monitoring.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        try:
+            trading_date = datetime.strptime(
+                date_str,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Recovery date must use YYYY-MM-DD format."
+            ) from error
+
+        today_eastern = datetime.now(eastern).date()
+
+        if trading_date != today_eastern:
+            raise ValueError(
+                "Live recovery is only available for today's "
+                "New York trading date."
+            )
+
+        if trading_date.weekday() >= 5:
+            raise ValueError(
+                "Live recovery requires a weekday trading date."
+            )
+
+        def parse_monitor_time(value):
+            if isinstance(value, time):
+                return value
+
+            if isinstance(value, str):
+                for format_string in ("%H:%M", "%H:%M:%S"):
+                    try:
+                        return datetime.strptime(
+                            value,
+                            format_string,
+                        ).time()
+                    except ValueError:
+                        continue
+
+            raise ValueError(
+                f"Invalid Fibonacci monitor time: {value!r}"
+            )
+
+        monitor_start = datetime.combine(
+            trading_date,
+            parse_monitor_time(
+                FIBONACCI_MONITOR_START
+            ),
+            tzinfo=eastern,
+        )
+
+        monitor_cutoff = datetime.combine(
+            trading_date,
+            parse_monitor_time(
+                FIBONACCI_MONITOR_CUTOFF
+            ),
+            tzinfo=eastern,
+        )
+
+        now_eastern = datetime.now(eastern)
+
+        if now_eastern < monitor_start:
+            raise RuntimeError(
+                "Live recovery cannot start before the Fibonacci "
+                "monitoring window."
+            )
+
+        if now_eastern >= monitor_cutoff:
+            raise RuntimeError(
+                "Live recovery cannot start after the Fibonacci "
+                "monitoring cutoff. Use fibonacci-paper instead."
+            )
+
+        window_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=30),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        window_end = datetime.combine(
+            trading_date,
+            time(hour=9, minute=44, second=59),
+            tzinfo=eastern,
+        ).astimezone(utc)
+
+        print()
+        print("===================================")
+        print(" Fibonacci Live Recovery")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(
+            f"Market-data feed: {MARKET_DATA_FEED.upper()}"
+        )
+        print(
+            "PAPER/PREVIEW ONLY — NOT SUBMITTED"
+        )
+        print(
+            "Backfilling the completed 09:30-09:44 "
+            "opening window..."
+        )
+
+        selected_symbols = self.refresh_symbols_for_date(
+            date_str=date_str,
+            data_feed=MARKET_DATA_FEED,
+        )
+
+        self.initialise_sheets(
+            write_sheets=write_sheets,
+        )
+
+        if write_sheets and self.scanner_statistics is not None:
+            try:
+                self.sheets.write_scanner_dashboard(
+                    date_str=date_str,
+                    statistics=self.scanner_statistics,
+                    selected_symbols=selected_symbols,
+                    scanner=self.scanner,
+                )
+            except Exception as error:
+                print(
+                    "Scanner dashboard update failed. "
+                    "Recovery will continue."
+                )
+                print(f"Dashboard error: {error}")
+
+        bars_by_symbol = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=self.symbols_csv,
+                start_iso=window_start.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                end_iso=window_end.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                feed=MARKET_DATA_FEED,
+            )
+        )
+
+        atrs = self.alpaca.get_previous_day_ranges_all(
+            symbols_csv=self.symbols_csv,
+            date_str=date_str,
+            feed=MARKET_DATA_FEED,
+        )
+
+        replay = HistoricalReplay(
+            stocks=self.stocks,
+            strategy=self.strategy,
+            speed=0.0,
+        )
+
+        summary = replay.run(
+            date_str=date_str,
+            window_start=window_start,
+            bars_by_symbol=bars_by_symbol,
+            atrs=atrs,
+            data_feed=MARKET_DATA_FEED,
+        )
+
+        complete_symbols = [
+            symbol
+            for symbol, stock in self.stocks.items()
+            if (
+                summary.processed_bars.get(symbol, 0) == 15
+                and stock.opening_bar is not None
+            )
+        ]
+
+        incomplete_symbols = [
+            symbol
+            for symbol in self.stocks
+            if symbol not in complete_symbols
+        ]
+
+        if incomplete_symbols:
+            print(
+                "Recovery excluded symbols with incomplete "
+                "opening data: "
+                + ", ".join(incomplete_symbols)
+            )
+
+        if not complete_symbols:
+            raise RuntimeError(
+                "Recovery could not construct one complete "
+                "15-minute opening range."
+            )
+
+        self.stocks = {
+            symbol: self.stocks[symbol]
+            for symbol in complete_symbols
+        }
+        self.symbols_csv = ",".join(complete_symbols)
+
+        print(
+            "Recovered complete opening ranges: "
+            + ", ".join(complete_symbols)
+        )
+        print()
+        print("Starting Fibonacci monitoring recovery...")
+
+        self.run_fibonacci_monitor(
+            date_str=date_str,
+            write_sheets=write_sheets,
+            publish_dashboard=publish_dashboard,
+        )
+
     def _publish_dashboard_session(
             self,
             date_str: str,
@@ -2216,17 +2438,25 @@ class TradingBot:
 
         write_errors: list[str] = []
 
+        if ACTIVE_STRATEGY == FIBONACCI_STRATEGY_NAME:
+            invest_sheet_name = "Fibonacci Invest"
+            orders_sheet_name = "Fibonacci Orders"
+        else:
+            invest_sheet_name = "Invest"
+            orders_sheet_name = "Orders"
+
         try:
             self.sheets.write_strategy_results(
                 date_str=date_str,
                 stocks=self.stocks,
+                sheet_name=invest_sheet_name,
             )
         except Exception as error:
             write_errors.append(
-                f"Invest sheet: {error}"
+                f"{invest_sheet_name} sheet: {error}"
             )
             print(
-                "Invest sheet write failed. "
+                f"{invest_sheet_name} sheet write failed. "
                 f"Error: {error}"
             )
 
@@ -2236,13 +2466,14 @@ class TradingBot:
             self.sheets.write_orders(
                 date_str=date_str,
                 stocks=self.stocks,
+                sheet_name=orders_sheet_name,
             )
         except Exception as error:
             write_errors.append(
-                f"Orders sheet: {error}"
+                f"{orders_sheet_name} sheet: {error}"
             )
             print(
-                "Orders sheet write failed. "
+                f"{orders_sheet_name} sheet write failed. "
                 f"Error: {error}"
             )
 

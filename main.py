@@ -102,6 +102,18 @@ def main() -> int:
                 publish_dashboard=False,
             )
 
+        elif mode == "live-recover":
+            if len(sys.argv) != 3:
+                print(
+                    "Usage: python main.py live-recover "
+                    "YYYY-MM-DD"
+                )
+                return 2
+
+            bot.run_live_recovery(
+                date_str=sys.argv[2],
+            )
+
         elif mode == "strategy":
             bot.run_strategy_test()
 
@@ -591,7 +603,8 @@ def main() -> int:
             print(f"Unknown mode: {mode}")
             print(
                 "Available modes: "
-                "test, smoke, preflight, live, live-dry-run, strategy, "
+                "test, smoke, preflight, live, live-dry-run, "
+                "live-recover, strategy, "
                 "write, replay, fibonacci-research, "
                 "fibonacci-retracement, "
                 "fibonacci-paper, "

@@ -1393,6 +1393,7 @@ class SheetsClient:
             self,
             date_str: str,
             stocks: dict,
+            sheet_name: str = "Invest",
     ) -> None:
         """
         Reconcile strategy-neutral active results in the Invest sheet.
@@ -1430,7 +1431,7 @@ class SheetsClient:
         ]
 
         worksheet = self.get_or_create_worksheet(
-            title="Invest",
+            title=sheet_name,
             rows=100,
             cols=len(invest_columns),
         )
@@ -1520,18 +1521,19 @@ class SheetsClient:
             date_str=date_str,
             replacement_rows=strategy_rows,
             last_column="Z",
-            sheet_name="Invest",
+            sheet_name=sheet_name,
         )
 
         print(
             f"{len(strategy_rows)} strategy row(s) reconciled "
-            "in the Invest sheet."
+            f"in the {sheet_name} sheet."
         )
 
     def write_orders(
             self,
             date_str: str,
             stocks: dict,
+            sheet_name: str = "Orders",
     ) -> None:
         order_columns = [
             "Date",
@@ -1550,7 +1552,7 @@ class SheetsClient:
         ]
 
         worksheet = self.get_or_create_worksheet(
-            title="Orders",
+            title=sheet_name,
             rows=100,
             cols=len(order_columns),
         )
@@ -1628,13 +1630,13 @@ class SheetsClient:
             date_str=date_str,
             replacement_rows=order_rows,
             last_column="M",
-            sheet_name="Orders",
+            sheet_name=sheet_name,
         )
 
         if order_rows:
             print(
                 f"{len(order_rows)} order(s) reconciled "
-                "in the Orders sheet."
+                f"in the {sheet_name} sheet."
             )
         else:
             print(

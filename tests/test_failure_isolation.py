@@ -107,8 +107,9 @@ def test_orders_write_is_attempted_when_invest_write_fails():
             self,
             date_str,
             stocks,
+                sheet_name="Invest",
         ):
-            events.append("Invest attempted")
+            events.append(f"{sheet_name} attempted")
             raise RuntimeError(
                 "CONTROLLED INVEST FAILURE"
             )
@@ -117,8 +118,9 @@ def test_orders_write_is_attempted_when_invest_write_fails():
             self,
             date_str,
             stocks,
+                sheet_name="Orders",
         ):
-            events.append("Orders attempted")
+            events.append(f"{sheet_name} attempted")
 
     bot.sheets = FakeSheets()
 
@@ -133,6 +135,6 @@ def test_orders_write_is_attempted_when_invest_write_fails():
     assert events == [
         "strategy calculated",
         "sheets initialised",
-        "Invest attempted",
-        "Orders attempted",
+        "Fibonacci Invest attempted",
+        "Fibonacci Orders attempted",
     ]

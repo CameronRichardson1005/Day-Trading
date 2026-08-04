@@ -68,14 +68,14 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-export ALPACA_DATA_FEED="sip"
+export ALPACA_DATA_FEED="iex"
 export PYTHONUNBUFFERED="1"
 
 echo "Starting Fibonacci paper evaluation..." \
   | tee -a "$LOG_FILE"
 
 "$PYTHON" main.py fibonacci-paper "$RUN_DATE" \
-  --feed sip \
+  --feed iex \
   --slippage-bps 15 2>&1 \
   | tee -a "$LOG_FILE"
 
