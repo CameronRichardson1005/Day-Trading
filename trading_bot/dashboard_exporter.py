@@ -9,6 +9,8 @@ from .config import (
     DASHBOARD_REQUEST_TIMEOUT,
     DASHBOARD_SITE_TOKEN,
     DASHBOARD_URL,
+    FIBONACCI_STRATEGY_NAME,
+    MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
 )
 from .models import Stock
@@ -115,51 +117,128 @@ class DashboardExporter:
         return result
 
     @staticmethod
+    def _optional_float(
+            value,
+    ) -> float | None:
+        """
+        Convert a numeric strategy value while preserving missing
+        optional data.
+        """
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        return None
+
+    @classmethod
     def _strategy_payload(
+            cls,
             stock: Stock,
     ) -> dict[str, Any]:
-        opening_bar = stock.opening_bar
+        """
+        Build strategy-neutral dashboard metadata.
 
-        return {
-            "atr": float(stock.atr),
-            "openingOpen": float(
-                opening_bar["o"]
+        Manipulation-specific and Fibonacci-specific fields coexist
+        so historical sessions remain readable.
+        """
+        payload: dict[str, Any] = {
+            "strategyName": (
+                stock.strategy_name
+                or MANIPULATION_STRATEGY_NAME
             ),
-            "openingHigh": float(
-                opening_bar["h"]
+            "strategyStatus": stock.strategy_status,
+            "detail": stock.strategy_detail,
+            "rejectionReason": (
+                stock.strategy_rejection_reason
             ),
-            "openingLow": float(
-                opening_bar["l"]
-            ),
-            "openingClose": float(
-                opening_bar["c"]
-            ),
-            "candleRange": float(
-                stock.candle_range
-            ),
-            "atrThreshold": float(
-                stock.atr_threshold
-            ),
-            "isManipulation": (
-                stock.is_manipulation
-            ),
-            "isRed": stock.is_red,
+            "atr": cls._optional_float(stock.atr),
         }
 
-    @staticmethod
-    def _rules(
+        opening_bar = stock.opening_bar
+
+        if isinstance(opening_bar, dict):
+            opening_fields = {
+                "openingOpen": "o",
+                "openingHigh": "h",
+                "openingLow": "l",
+                "openingClose": "c",
+            }
+
+            for output_name, source_name in (
+                opening_fields.items()
+            ):
+                value = opening_bar.get(source_name)
+
+                if isinstance(value, (int, float)):
+                    payload[output_name] = float(value)
+
+        optional_fields = {
+            "candleRange": stock.candle_range,
+            "atrThreshold": stock.atr_threshold,
+            "rewardRisk": stock.reward_risk,
+            "retracementPrice": (
+                stock.retracement_price
+            ),
+            "impulseAtrMultiple": (
+                stock.impulse_atr_multiple
+            ),
+            "pullbackVolumeRatio": (
+                stock.pullback_volume_ratio
+            ),
+        }
+
+        for output_name, value in optional_fields.items():
+            converted = cls._optional_float(value)
+
+            if converted is not None:
+                payload[output_name] = converted
+
+        if stock.confirmation_time:
+            payload["confirmationTime"] = (
+                stock.confirmation_time
+            )
+
+        payload["isManipulation"] = (
+            bool(stock.is_manipulation)
+        )
+        payload["isRed"] = bool(stock.is_red)
+
+        return payload
+
+    @classmethod
+    def _manipulation_rules(
+            cls,
             stock: Stock,
     ) -> list[dict[str, Any]]:
-        opening_bar = stock.opening_bar
+        opening_bar = stock.opening_bar or {}
+
+        candle_range = cls._optional_float(
+            stock.candle_range
+        )
+        atr_threshold = cls._optional_float(
+            stock.atr_threshold
+        )
+
+        open_price = cls._optional_float(
+            opening_bar.get("o")
+        )
+        close_price = cls._optional_float(
+            opening_bar.get("c")
+        )
 
         return [
             {
                 "label": "Manipulation candle",
-                "passed": stock.is_manipulation,
+                "passed": bool(stock.is_manipulation),
                 "actual": (
-                    f"Range ${stock.candle_range:.4f}; "
-                    f"ATR threshold "
-                    f"${stock.atr_threshold:.4f}"
+                    (
+                        f"Range ${candle_range:.4f}; "
+                        f"ATR threshold ${atr_threshold:.4f}"
+                    )
+                    if (
+                        candle_range is not None
+                        and atr_threshold is not None
+                    )
+                    else "Unavailable"
                 ),
                 "requirement": (
                     "Range exceeds the ATR threshold "
@@ -168,11 +247,17 @@ class DashboardExporter:
             },
             {
                 "label": "Red opening candle",
-                "passed": stock.is_red,
+                "passed": bool(stock.is_red),
                 "actual": (
-                    f"Open ${float(opening_bar['o']):.4f}; "
-                    f"close "
-                    f"${float(opening_bar['c']):.4f}"
+                    (
+                        f"Open ${open_price:.4f}; "
+                        f"close ${close_price:.4f}"
+                    )
+                    if (
+                        open_price is not None
+                        and close_price is not None
+                    )
+                    else "Unavailable"
                 ),
                 "requirement": (
                     "Opening close is below "
@@ -182,13 +267,111 @@ class DashboardExporter:
         ]
 
     @classmethod
+    def _fibonacci_rules(
+            cls,
+            stock: Stock,
+    ) -> list[dict[str, Any]]:
+        impulse = cls._optional_float(
+            stock.impulse_atr_multiple
+        )
+        volume_ratio = cls._optional_float(
+            stock.pullback_volume_ratio
+        )
+        reward_risk = cls._optional_float(
+            stock.reward_risk
+        )
+
+        return [
+            {
+                "label": "61.8% retracement setup",
+                "passed": (
+                    stock.retracement_price is not None
+                ),
+                "actual": (
+                    (
+                        f"${float(stock.retracement_price):.4f}"
+                    )
+                    if stock.retracement_price is not None
+                    else "Not confirmed"
+                ),
+                "requirement": (
+                    "Price touches the 61.8% Fibonacci "
+                    "retracement"
+                ),
+            },
+            {
+                "label": "Impulse strength",
+                "passed": (
+                    impulse is not None
+                    and impulse >= 0.50
+                ),
+                "actual": (
+                    f"{impulse:.3f} ATR"
+                    if impulse is not None
+                    else "Unavailable"
+                ),
+                "requirement": "At least 0.50 ATR",
+            },
+            {
+                "label": "Pullback volume",
+                "passed": (
+                    volume_ratio is not None
+                    and volume_ratio < 1.0
+                ),
+                "actual": (
+                    f"{volume_ratio:.3f}"
+                    if volume_ratio is not None
+                    else "Unavailable"
+                ),
+                "requirement": "Ratio below 1.0",
+            },
+            {
+                "label": "Reward / risk",
+                "passed": (
+                    reward_risk is not None
+                    and reward_risk >= 1.5
+                ),
+                "actual": (
+                    f"{reward_risk:.2f}"
+                    if reward_risk is not None
+                    else "Unavailable"
+                ),
+                "requirement": "At least 1.50",
+            },
+            {
+                "label": "Bullish confirmation",
+                "passed": bool(
+                    stock.confirmation_time
+                ),
+                "actual": (
+                    stock.confirmation_time
+                    or "Not confirmed"
+                ),
+                "requirement": (
+                    "Bullish confirmation candle within "
+                    "the permitted confirmation window"
+                ),
+            },
+        ]
+
+    @classmethod
+    def _rules(
+            cls,
+            stock: Stock,
+    ) -> list[dict[str, Any]]:
+        if stock.strategy_name == FIBONACCI_STRATEGY_NAME:
+            return cls._fibonacci_rules(stock)
+
+        return cls._manipulation_rules(stock)
+
+    @classmethod
     def _symbol_payload(
             cls,
             stock: Stock,
             bars_processed: int,
     ) -> dict[str, Any]:
         has_all_bars = (
-            bars_processed == cls.EXPECTED_BARS
+            bars_processed >= cls.EXPECTED_BARS
         )
         strategy_complete = (
             has_all_bars
@@ -306,9 +489,20 @@ class DashboardExporter:
             run_mode: str = "MANUAL",
     ) -> dict[str, Any]:
         source = source.upper()
-        if source not in {"REPLAY", "LIVE"}:
+
+        supported_sources = {
+            "REPLAY",
+            "LIVE",
+            "LIVE_MANIPULATION",
+            "LIVE_FIBONACCI",
+            "LIVE_FIBONACCI_FINAL",
+        }
+
+        if source not in supported_sources:
             raise ValueError(
-                "Dashboard source must be REPLAY or LIVE."
+                "Unsupported dashboard source: "
+                f"{source}. Expected one of: "
+                + ", ".join(sorted(supported_sources))
             )
 
         data_feed = data_feed.strip().lower()

@@ -437,3 +437,199 @@ def test_no_invest_symbol_does_not_export_webull_preview():
     )
 
     assert "webullPreview" not in payload["symbols"][0]
+
+
+def fibonacci_stock(
+        signal="INVEST",
+):
+    stock = Stock(symbol="OPEN")
+    stock.strategy_name = "FIBONACCI_61_8"
+    stock.strategy_status = (
+        "ACTIVE PAPER/PREVIEW — NOT SUBMITTED"
+    )
+    stock.strategy_detail = (
+        "Qualifying 61.8% retracement confirmed."
+    )
+    stock.signal = signal
+    stock.opening_bar = {
+        "o": 4.00,
+        "h": 4.20,
+        "l": 3.95,
+        "c": 4.15,
+    }
+    stock.atr = 0.40
+    stock.limit_buy = 4.25
+    stock.limit_sell = 4.60
+    stock.stop_loss = 4.10
+    stock.trading_stop_loss = 4.10
+    stock.reward_risk = 2.33
+    stock.confirmation_time = "10:08"
+    stock.retracement_price = 4.18
+    stock.impulse_atr_multiple = 0.72
+    stock.pullback_volume_ratio = 0.64
+    return stock
+
+
+def test_fibonacci_monitor_source_is_supported():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 38,
+        },
+        data_feed="sip",
+        run_mode="SCHEDULED",
+    )
+
+    assert payload["source"] == "LIVE_FIBONACCI"
+    assert payload["status"] == "COMPLETE"
+    assert payload["id"] == (
+        "live_fibonacci-2026-08-03"
+    )
+
+
+def test_fibonacci_final_source_is_supported():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI_FINAL",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 90,
+        },
+        data_feed="sip",
+    )
+
+    assert payload["source"] == (
+        "LIVE_FIBONACCI_FINAL"
+    )
+
+
+def test_fibonacci_strategy_metadata_is_exported():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 38,
+        },
+        data_feed="sip",
+    )
+
+    strategy = payload["symbols"][0]["strategy"]
+
+    assert strategy["strategyName"] == "FIBONACCI_61_8"
+    assert (
+        strategy["strategyStatus"]
+        == "ACTIVE PAPER/PREVIEW — NOT SUBMITTED"
+    )
+    assert strategy["rewardRisk"] == 2.33
+    assert strategy["confirmationTime"] == "10:08"
+    assert strategy["retracementPrice"] == 4.18
+    assert strategy["impulseAtrMultiple"] == 0.72
+    assert strategy["pullbackVolumeRatio"] == 0.64
+
+
+def test_fibonacci_rules_replace_manipulation_rules():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 38,
+        },
+        data_feed="sip",
+    )
+
+    labels = [
+        rule["label"]
+        for rule in payload["symbols"][0]["rules"]
+    ]
+
+    assert "61.8% retracement setup" in labels
+    assert "Impulse strength" in labels
+    assert "Pullback volume" in labels
+    assert "Reward / risk" in labels
+    assert "Bullish confirmation" in labels
+    assert "Manipulation candle" not in labels
+
+
+def test_fibonacci_rejection_reason_is_exported():
+    stock = fibonacci_stock(signal="NO INVEST")
+    stock.strategy_rejection_reason = (
+        "REWARD_RISK_BELOW_MINIMUM"
+    )
+    stock.reward_risk = 1.20
+    stock.limit_buy = None
+    stock.limit_sell = None
+    stock.stop_loss = None
+    stock.trading_stop_loss = None
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={"OPEN": stock},
+        processed_bars={"OPEN": 38},
+        data_feed="sip",
+    )
+
+    symbol = payload["symbols"][0]
+
+    assert symbol["signal"] == "NO INVEST"
+    assert (
+        symbol["strategy"]["rejectionReason"]
+        == "REWARD_RISK_BELOW_MINIMUM"
+    )
+    assert "levels" not in symbol
+
+
+def test_more_than_fifteen_bars_remains_complete():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 45,
+        },
+        data_feed="sip",
+    )
+
+    symbol = payload["symbols"][0]
+
+    assert payload["status"] == "COMPLETE"
+    assert symbol["signal"] == "INVEST"
+
+
+def test_fibonacci_webull_preview_never_reports_submitted():
+    stock = fibonacci_stock()
+    stock.webull_preview = {
+        "status": "PREVIEW READY",
+        "submitted": True,
+        "symbol": "OPEN",
+        "quantity": 100,
+        "limitBuy": 4.25,
+        "target": 4.60,
+        "tradingStopLoss": 4.10,
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-03",
+        source="LIVE_FIBONACCI",
+        stocks={"OPEN": stock},
+        processed_bars={"OPEN": 38},
+        data_feed="sip",
+    )
+
+    preview = payload["symbols"][0]["webullPreview"]
+
+    assert preview["submitted"] is False
