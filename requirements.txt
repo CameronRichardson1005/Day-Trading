@@ -1,0 +1,24 @@
+# Runtime dependencies for the trading bot.
+#
+# Install with: pip install -r requirements.txt
+
+# HTTP used by AlpacaClient, DashboardExporter, and FibonacciDashboardPublisher.
+requests==2.31.0
+
+# Google Sheets writer and authentication.
+gspread>=5.12.0
+google-auth>=2.23.0
+
+# WebSocket client used by AlpacaStockStream.
+websockets>=12.0
+
+# Environment variable loader used by trading_bot/config.py.
+python-dotenv>=1.0.0
+
+# Webull preview SDK. The integration is preview-only and never submits
+# orders. Optional at runtime; the import error is tolerated by the
+# webull_preview_client module when WEBULL_PREVIEW_ENABLED is false.
+webull>=1.0.0
+
+# Manipulate .xlsx files for archival/reporting workflows.
+openpyxl>=3.1.0

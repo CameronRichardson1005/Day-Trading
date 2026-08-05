@@ -381,7 +381,7 @@ def main() -> int:
                         "[--feed iex|sip] "
                         "[--slippage-bps NUMBER] "
                         "[--commission-per-share NUMBER] "
-                    "[--minimum-impulse-atr NUMBER]"
+                        "[--minimum-impulse-atr NUMBER]"
                     )
                     return 2
 
