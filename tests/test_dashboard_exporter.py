@@ -633,3 +633,29 @@ def test_fibonacci_webull_preview_never_reports_submitted():
     preview = payload["symbols"][0]["webullPreview"]
 
     assert preview["submitted"] is False
+
+
+
+def test_dashboard_caps_opening_bars_processed_at_fifteen():
+    stock = Stock(symbol="OPEN")
+    stock.signal = "NO INVEST"
+    stock.opening_bar = {
+        "o": 3.91,
+        "h": 3.95,
+        "l": 3.80,
+        "c": 3.815,
+    }
+    stock.atr = 0.20
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-05",
+        source="LIVE_FIBONACCI",
+        stocks={"OPEN": stock},
+        processed_bars={"OPEN": 18},
+        data_feed="iex",
+    )
+
+    symbol_payload = payload["symbols"][0]
+
+    assert symbol_payload["barsProcessed"] == 15
+    assert symbol_payload["barsExpected"] == 15

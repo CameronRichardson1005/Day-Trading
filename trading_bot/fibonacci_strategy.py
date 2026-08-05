@@ -39,6 +39,20 @@ class Fibonacci618Strategy:
         stock.strategy_status = self.status
         stock.atr = atr
 
+        opening_bar = stock.opening_bar
+
+        if isinstance(opening_bar, dict):
+            opening_open = opening_bar.get("o")
+            opening_close = opening_bar.get("c")
+
+            stock.is_red = (
+                isinstance(opening_open, (int, float))
+                and isinstance(opening_close, (int, float))
+                and float(opening_close) < float(opening_open)
+            )
+        else:
+            stock.is_red = False
+
         setups = analyse_symbol_day(
             date_str=date_str,
             symbol=stock.symbol,
@@ -70,9 +84,7 @@ class Fibonacci618Strategy:
 
             if setup is not None:
                 stock.strategy_rejection_reason = (
-                    setup.rejection_reason
-                    or setup.detail
-                    or "FIBONACCI_RULES_NOT_SATISFIED"
+                    self._qualification_rejection_reason(setup)
                 )
 
             return stock
@@ -105,6 +117,52 @@ class Fibonacci618Strategy:
         stock.strategy_rejection_reason = ""
 
         return stock
+
+    @staticmethod
+    def _qualification_rejection_reason(
+        setup: Any,
+    ) -> str:
+        """
+        Return the first explicit paper-qualification rule that
+        rejected the setup.
+        """
+        if setup.rejection_reason:
+            return str(setup.rejection_reason)
+
+        if not setup.setup_found:
+            return (
+                setup.detail
+                or "FIBONACCI_SETUP_NOT_FOUND"
+            )
+
+        if setup.impulse_atr_multiple is None:
+            return "IMPULSE_ATR_MULTIPLE_UNAVAILABLE"
+
+        if setup.impulse_atr_multiple < 0.50:
+            return "IMPULSE_BELOW_0_50_ATR"
+
+        if setup.impulse_duration_minutes is None:
+            return "IMPULSE_DURATION_UNAVAILABLE"
+
+        if setup.impulse_duration_minutes < 15:
+            return "IMPULSE_DURATION_BELOW_15_MINUTES"
+
+        if setup.pullback_volume_ratio is None:
+            return "PULLBACK_VOLUME_RATIO_UNAVAILABLE"
+
+        if setup.pullback_volume_ratio >= 1.0:
+            return "PULLBACK_VOLUME_NOT_LOWER_THAN_IMPULSE"
+
+        if setup.reward_risk is None:
+            return "REWARD_RISK_UNAVAILABLE"
+
+        if setup.reward_risk < 1.5:
+            return "REWARD_RISK_BELOW_1_50"
+
+        return (
+            setup.detail
+            or "FIBONACCI_RULES_NOT_SATISFIED"
+        )
 
     @staticmethod
     def _reset_active_fields(stock: Stock) -> None:

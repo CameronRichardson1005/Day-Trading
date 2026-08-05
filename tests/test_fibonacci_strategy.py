@@ -149,3 +149,143 @@ def test_fibonacci_adapter_does_not_expose_submission_method():
 
     assert not hasattr(strategy, "submit_order")
     assert not hasattr(strategy, "place_order")
+
+
+
+def test_fibonacci_adapter_derives_red_opening_candle(
+        monkeypatch,
+):
+    monkeypatch.setattr(
+        strategy_module,
+        "analyse_symbol_day",
+        lambda **kwargs: [setup_record()],
+    )
+
+    stock = Stock(symbol="TEST")
+    stock.opening_bar = {
+        "o": 10.00,
+        "h": 10.20,
+        "l": 9.80,
+        "c": 9.90,
+    }
+
+    result = Fibonacci618Strategy().evaluate(
+        stock=stock,
+        date_str="2026-08-03",
+        bars=[],
+        atr=1.0,
+        data_feed="iex",
+    )
+
+    assert result.is_red is True
+
+
+def test_fibonacci_adapter_derives_green_opening_candle(
+        monkeypatch,
+):
+    monkeypatch.setattr(
+        strategy_module,
+        "analyse_symbol_day",
+        lambda **kwargs: [setup_record()],
+    )
+
+    stock = Stock(symbol="TEST")
+    stock.opening_bar = {
+        "o": 10.00,
+        "h": 10.20,
+        "l": 9.80,
+        "c": 10.10,
+    }
+
+    result = Fibonacci618Strategy().evaluate(
+        stock=stock,
+        date_str="2026-08-03",
+        bars=[],
+        atr=1.0,
+        data_feed="iex",
+    )
+
+    assert result.is_red is False
+
+
+def test_fibonacci_adapter_missing_opening_bar_is_not_red(
+        monkeypatch,
+):
+    monkeypatch.setattr(
+        strategy_module,
+        "analyse_symbol_day",
+        lambda **kwargs: [setup_record()],
+    )
+
+    stock = Stock(symbol="TEST")
+    stock.opening_bar = None
+
+    result = Fibonacci618Strategy().evaluate(
+        stock=stock,
+        date_str="2026-08-03",
+        bars=[],
+        atr=1.0,
+        data_feed="iex",
+    )
+
+    assert result.is_red is False
+
+
+def test_volume_rejection_has_explicit_reason(
+        monkeypatch,
+):
+    monkeypatch.setattr(
+        strategy_module,
+        "analyse_symbol_day",
+        lambda **kwargs: [
+            setup_record(
+                pullback_volume_ratio=1.10,
+            )
+        ],
+    )
+
+    stock = Stock(symbol="TEST")
+
+    result = Fibonacci618Strategy().evaluate(
+        stock=stock,
+        date_str="2026-08-03",
+        bars=[],
+        atr=1.0,
+        data_feed="iex",
+    )
+
+    assert result.signal == "NO INVEST"
+    assert (
+        result.strategy_rejection_reason
+        == "PULLBACK_VOLUME_NOT_LOWER_THAN_IMPULSE"
+    )
+
+
+def test_short_impulse_has_explicit_reason(
+        monkeypatch,
+):
+    monkeypatch.setattr(
+        strategy_module,
+        "analyse_symbol_day",
+        lambda **kwargs: [
+            setup_record(
+                impulse_duration_minutes=10,
+            )
+        ],
+    )
+
+    stock = Stock(symbol="TEST")
+
+    result = Fibonacci618Strategy().evaluate(
+        stock=stock,
+        date_str="2026-08-03",
+        bars=[],
+        atr=1.0,
+        data_feed="iex",
+    )
+
+    assert result.signal == "NO INVEST"
+    assert (
+        result.strategy_rejection_reason
+        == "IMPULSE_DURATION_BELOW_15_MINUTES"
+    )

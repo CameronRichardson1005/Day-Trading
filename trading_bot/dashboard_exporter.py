@@ -370,6 +370,17 @@ class DashboardExporter:
             stock: Stock,
             bars_processed: int,
     ) -> dict[str, Any]:
+        # Dashboard completeness refers only to the 09:30-09:44
+        # opening window. Later Fibonacci-monitoring bars must not
+        # increase this value beyond the expected 15 bars.
+        bars_processed = max(
+            0,
+            min(
+                int(bars_processed),
+                cls.EXPECTED_BARS,
+            ),
+        )
+
         has_all_bars = (
             bars_processed >= cls.EXPECTED_BARS
         )
