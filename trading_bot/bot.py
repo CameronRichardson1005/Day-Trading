@@ -3126,9 +3126,33 @@ class TradingBot:
             return
 
         last_signature = None
+        previous_poll_time = None
 
         while True:
             now = now_fn()
+
+            if previous_poll_time is not None:
+                elapsed_seconds = (
+                    now - previous_poll_time
+                ).total_seconds()
+
+                expected_seconds = (
+                    FIBONACCI_MONITOR_INTERVAL_SECONDS
+                )
+
+                if elapsed_seconds > max(
+                    expected_seconds * 2,
+                    120,
+                ):
+                    print(
+                        "WARNING: Fibonacci monitoring resumed "
+                        f"after a {elapsed_seconds:.0f}-second gap. "
+                        "The process may have been suspended or "
+                        "the computer may have slept. Catching up "
+                        "using the latest completed minute."
+                    )
+
+            previous_poll_time = now
 
             if now >= monitor_cutoff:
                 break

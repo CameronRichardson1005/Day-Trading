@@ -441,3 +441,85 @@ def test_monitor_calculates_outcomes_in_dry_run(
         and event[0] == "dashboard"
         for event in events
     )
+
+
+
+def test_monitor_logs_and_catches_up_after_long_gap(
+        monkeypatch,
+        capsys,
+):
+    events = []
+    bot = make_bot(events)
+
+    bot.current_signal_signature = lambda: ()
+
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "FIBONACCI_61_8",
+    )
+    monkeypatch.setattr(
+        bot_module,
+        "FIBONACCI_MONITOR_CUTOFF",
+        "11:00",
+    )
+
+    bot.run_fibonacci_monitor(
+        date_str="2026-08-03",
+        write_sheets=False,
+        publish_dashboard=False,
+        now_fn=sequence_clock([
+            datetime(
+                2026,
+                8,
+                3,
+                10,
+                25,
+                10,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                10,
+                25,
+                10,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                10,
+                40,
+                15,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                11,
+                0,
+                0,
+                tzinfo=EASTERN,
+            ),
+        ]),
+        sleep_fn=lambda seconds: None,
+    )
+
+    output = capsys.readouterr().out
+
+    assert "monitoring resumed after a" in output
+    assert "Catching up using the latest completed minute" in output
+
+    assert (
+        "evaluate",
+        "10:40:00",
+    ) in events
+
+    assert (
+        "evaluate",
+        "11:00:00",
+    ) in events
