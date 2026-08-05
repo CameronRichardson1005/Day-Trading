@@ -8,21 +8,7 @@ from trading_bot.fibonacci_research import (
     simulate_trade,
 )
 
-
-def bar(
-    timestamp: str,
-    *,
-    high: float,
-    low: float,
-    close: float,
-):
-    return {
-        "t": timestamp,
-        "o": close,
-        "h": high,
-        "l": low,
-        "c": close,
-    }
+from conftest import make_bar
 
 
 def test_control_ratio_is_deterministic_and_non_fibonacci():
@@ -65,14 +51,16 @@ def test_combined_rule_requires_all_conditions():
 def test_simulation_records_target_win():
     result = simulate_trade(
         bars=[
-            bar(
+            make_bar(
                 "2026-07-30T13:46:00Z",
+                open_price=10.00,
                 high=10.05,
                 low=9.95,
                 close=10.00,
             ),
-            bar(
+            make_bar(
                 "2026-07-30T13:47:00Z",
+                open_price=10.40,
                 high=10.50,
                 low=10.00,
                 close=10.40,
@@ -92,8 +80,9 @@ def test_simulation_records_target_win():
 def test_same_minute_target_and_stop_is_loss():
     result = simulate_trade(
         bars=[
-            bar(
+            make_bar(
                 "2026-07-30T13:46:00Z",
+                open_price=10.10,
                 high=10.50,
                 low=9.70,
                 close=10.10,
@@ -142,8 +131,9 @@ def test_report_creates_all_rule_target_records():
         stock=stock,
         bars_processed=15,
         outcome_bars=[
-            bar(
+            make_bar(
                 "2026-07-30T13:46:00Z",
+                open_price=10.5,
                 high=10.7,
                 low=9.99,
                 close=10.5,

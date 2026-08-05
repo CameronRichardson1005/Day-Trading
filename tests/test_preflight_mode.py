@@ -1,9 +1,7 @@
 import main as main_module
 
-from trading_bot.bot import TradingBot
 
-
-def test_preflight_succeeds_without_starting_workflows():
+def test_preflight_succeeds_without_starting_workflows(trading_bot):
     events = []
 
     class FakeSheets:
@@ -15,10 +13,9 @@ def test_preflight_succeeds_without_starting_workflows():
                 "1 minute intervals",
             ]
 
-    bot = object.__new__(TradingBot)
-    bot.scanner_statistics = object()
-    bot.sheets = None
-    bot.tracker = None
+    trading_bot.scanner_statistics = object()
+    trading_bot.sheets = None
+    trading_bot.tracker = None
 
     def refresh_symbols(date_str):
         events.append(("refresh", date_str))
@@ -26,13 +23,13 @@ def test_preflight_succeeds_without_starting_workflows():
 
     def initialise_sheets():
         events.append("initialise_sheets")
-        bot.sheets = FakeSheets()
-        bot.tracker = object()
+        trading_bot.sheets = FakeSheets()
+        trading_bot.tracker = object()
 
-    bot.refresh_symbols_for_date = refresh_symbols
-    bot.initialise_sheets = initialise_sheets
+    trading_bot.refresh_symbols_for_date = refresh_symbols
+    trading_bot.initialise_sheets = initialise_sheets
 
-    assert bot.run_preflight("2026-07-27") is True
+    assert trading_bot.run_preflight("2026-07-27") is True
     assert events == [
         ("refresh", "2026-07-27"),
         "initialise_sheets",
@@ -40,11 +37,10 @@ def test_preflight_succeeds_without_starting_workflows():
     ]
 
 
-def test_preflight_stops_when_scanner_is_unavailable():
-    bot = object.__new__(TradingBot)
-    bot.scanner_statistics = None
+def test_preflight_stops_when_scanner_is_unavailable(trading_bot):
+    trading_bot.scanner_statistics = None
 
-    bot.refresh_symbols_for_date = (
+    trading_bot.refresh_symbols_for_date = (
         lambda date_str: ["BBAI", "OPEN"]
     )
 
@@ -53,12 +49,12 @@ def test_preflight_stops_when_scanner_is_unavailable():
             "Sheets should not be initialised."
         )
 
-    bot.initialise_sheets = unexpected_initialisation
+    trading_bot.initialise_sheets = unexpected_initialisation
 
-    assert bot.run_preflight("2026-07-27") is False
+    assert trading_bot.run_preflight("2026-07-27") is False
 
 
-def test_preflight_stops_when_required_sheet_is_missing():
+def test_preflight_stops_when_required_sheet_is_missing(trading_bot):
     class FakeSheets:
         def test_connection(self):
             return [
@@ -66,22 +62,21 @@ def test_preflight_stops_when_required_sheet_is_missing():
                 "1 minute intervals",
             ]
 
-    bot = object.__new__(TradingBot)
-    bot.scanner_statistics = object()
-    bot.sheets = None
-    bot.tracker = None
+    trading_bot.scanner_statistics = object()
+    trading_bot.sheets = None
+    trading_bot.tracker = None
 
-    bot.refresh_symbols_for_date = (
+    trading_bot.refresh_symbols_for_date = (
         lambda date_str: ["BBAI", "OPEN"]
     )
 
     def initialise_sheets():
-        bot.sheets = FakeSheets()
-        bot.tracker = object()
+        trading_bot.sheets = FakeSheets()
+        trading_bot.tracker = object()
 
-    bot.initialise_sheets = initialise_sheets
+    trading_bot.initialise_sheets = initialise_sheets
 
-    assert bot.run_preflight("2026-07-27") is False
+    assert trading_bot.run_preflight("2026-07-27") is False
 
 
 def test_main_dispatches_preflight_mode(monkeypatch):

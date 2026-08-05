@@ -1,25 +1,8 @@
 from trading_bot.scanner import StockScanner
-from trading_bot.scanner import StockStats
 from trading_bot.sheets_client import SheetsClient
 from trading_bot.models import Stock
 
-
-def make_stats(
-        symbol,
-        avg_volume,
-        avg_price,
-        avg_range,
-        avg_range_pct,
-        valid_bars=30,
-):
-    return StockStats(
-        symbol=symbol,
-        valid_bars=valid_bars,
-        avg_volume=avg_volume,
-        avg_price=avg_price,
-        avg_range=avg_range,
-        avg_range_pct=avg_range_pct,
-    )
+from conftest import make_stats
 
 
 def test_eligibility_failures_match_scanner_rules():
@@ -28,7 +11,7 @@ def test_eligibility_failures_match_scanner_rules():
     )
 
     stats = make_stats(
-        symbol="FAIL",
+        "FAIL",
         valid_bars=10,
         avg_volume=100_000,
         avg_price=50.0,
@@ -53,21 +36,21 @@ def test_scanner_dashboard_reconciles_ranked_rows():
 
     statistics = [
         make_stats(
-            symbol="LYFT",
+            "LYFT",
             avg_volume=800_000,
             avg_price=15.0,
             avg_range=0.60,
             avg_range_pct=5.0,
         ),
         make_stats(
-            symbol="SNAP",
+            "SNAP",
             avg_volume=2_000_000,
             avg_price=5.0,
             avg_range=0.50,
             avg_range_pct=5.0,
         ),
         make_stats(
-            symbol="UBER",
+            "UBER",
             avg_volume=1_000_000,
             avg_price=72.0,
             avg_range=2.00,

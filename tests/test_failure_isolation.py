@@ -2,14 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from trading_bot.bot import TradingBot
 
-
-def test_ticker_failure_does_not_stop_remaining_tickers():
+def test_ticker_failure_does_not_stop_remaining_tickers(trading_bot):
     events = []
-    bot = object.__new__(TradingBot)
 
-    bot.stocks = {
+    trading_bot.stocks = {
         "FAIL": SimpleNamespace(
             symbol="FAIL",
             signal=None,
@@ -59,14 +56,14 @@ def test_ticker_failure_does_not_stop_remaining_tickers():
 
             stock.signal = "INVEST"
 
-    bot.alpaca = FakeAlpaca()
-    bot.strategy = FakeStrategy()
-    bot.symbols_csv = "FAIL,PASS"
+    trading_bot.alpaca = FakeAlpaca()
+    trading_bot.strategy = FakeStrategy()
+    trading_bot.symbols_csv = "FAIL,PASS"
 
-    bot.calculate_strategy("2026-07-23")
+    trading_bot.calculate_strategy("2026-07-23")
 
-    assert bot.stocks["FAIL"].signal == "NO INVEST"
-    assert bot.stocks["PASS"].signal == "INVEST"
+    assert trading_bot.stocks["FAIL"].signal == "NO INVEST"
+    assert trading_bot.stocks["PASS"].signal == "INVEST"
     assert events == [
         "opening bars requested",
         "ATRs requested",
@@ -75,21 +72,20 @@ def test_ticker_failure_does_not_stop_remaining_tickers():
     ]
 
 
-def test_orders_write_is_attempted_when_invest_write_fails():
+def test_orders_write_is_attempted_when_invest_write_fails(trading_bot):
     events = []
-    bot = object.__new__(TradingBot)
 
-    bot.stocks = {
+    trading_bot.stocks = {
         "OPEN": SimpleNamespace(
             symbol="OPEN",
             signal="INVEST",
         ),
     }
 
-    bot.calculate_strategy = lambda date_str: events.append(
+    trading_bot.calculate_strategy = lambda date_str: events.append(
         "strategy calculated"
     )
-    bot.initialise_sheets = lambda: events.append(
+    trading_bot.initialise_sheets = lambda: events.append(
         "sheets initialised"
     )
 
@@ -111,13 +107,13 @@ def test_orders_write_is_attempted_when_invest_write_fails():
         ):
             events.append("Orders attempted")
 
-    bot.sheets = FakeSheets()
+    trading_bot.sheets = FakeSheets()
 
     with pytest.raises(
         RuntimeError,
         match="One or more strategy writes failed",
     ):
-        bot.run_strategy_and_write(
+        trading_bot.run_strategy_and_write(
             date_str="2026-07-23"
         )
 

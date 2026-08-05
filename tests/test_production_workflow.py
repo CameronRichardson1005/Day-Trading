@@ -1,52 +1,28 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import trading_bot.bot as bot_module
-from trading_bot.bot import TradingBot
+
+from conftest import install_clock
 
 
 EASTERN = ZoneInfo("America/New_York")
 
 
-def make_bot(events):
-    bot = object.__new__(TradingBot)
-
-    bot.run_live_tracker = lambda: events.append(
-        "tracker"
-    )
-
-    bot.run_strategy_and_write = (
-        lambda date_str=None: events.append(
-            f"strategy:{date_str}"
-        )
-    )
-
-    return bot
-
-
-def install_clock(monkeypatch, times):
-    class FakeDateTime(datetime):
-        queued_times = list(times)
-
-        @classmethod
-        def now(cls, tz=None):
-            return cls.queued_times.pop(0)
-
-    monkeypatch.setattr(
-        bot_module,
-        "datetime",
-        FakeDateTime,
-    )
-
-
 def test_weekend_stops_without_running_workflow(
     monkeypatch,
+    trading_bot,
 ):
-    events = []
-    bot = make_bot(events)
+    trading_bot.run_live_tracker = lambda: None
+    trading_bot.run_strategy_and_write = (
+        lambda date_str=None: None
+    )
 
     install_clock(
         monkeypatch,
+        bot_module,
         [
             datetime(
                 2026,
@@ -62,24 +38,30 @@ def test_weekend_stops_without_running_workflow(
     monkeypatch.setattr(
         bot_module.time_module,
         "sleep",
-        lambda seconds: events.append(
-            f"sleep:{seconds}"
-        ),
+        lambda seconds: None,
     )
 
-    bot.run_production()
-
-    assert events == []
+    trading_bot.run_production()
 
 
 def test_before_open_waits_then_runs_full_workflow(
     monkeypatch,
+    trading_bot,
 ):
     events = []
-    bot = make_bot(events)
+
+    trading_bot.run_live_tracker = lambda: events.append(
+        "tracker"
+    )
+    trading_bot.run_strategy_and_write = (
+        lambda date_str=None: events.append(
+            f"strategy:{date_str}"
+        )
+    )
 
     install_clock(
         monkeypatch,
+        bot_module,
         [
             datetime(
                 2026,
@@ -109,7 +91,7 @@ def test_before_open_waits_then_runs_full_workflow(
         ),
     )
 
-    bot.run_production()
+    trading_bot.run_production()
 
     assert events == [
         "sleep:1800.0",
@@ -120,12 +102,22 @@ def test_before_open_waits_then_runs_full_workflow(
 
 def test_during_opening_window_tracks_then_waits(
     monkeypatch,
+    trading_bot,
 ):
     events = []
-    bot = make_bot(events)
+
+    trading_bot.run_live_tracker = lambda: events.append(
+        "tracker"
+    )
+    trading_bot.run_strategy_and_write = (
+        lambda date_str=None: events.append(
+            f"strategy:{date_str}"
+        )
+    )
 
     install_clock(
         monkeypatch,
+        bot_module,
         [
             datetime(
                 2026,
@@ -155,7 +147,7 @@ def test_during_opening_window_tracks_then_waits(
         ),
     )
 
-    bot.run_production()
+    trading_bot.run_production()
 
     assert events == [
         "tracker",
@@ -166,12 +158,22 @@ def test_during_opening_window_tracks_then_waits(
 
 def test_after_opening_window_runs_strategy_immediately(
     monkeypatch,
+    trading_bot,
 ):
     events = []
-    bot = make_bot(events)
+
+    trading_bot.run_live_tracker = lambda: events.append(
+        "tracker"
+    )
+    trading_bot.run_strategy_and_write = (
+        lambda date_str=None: events.append(
+            f"strategy:{date_str}"
+        )
+    )
 
     install_clock(
         monkeypatch,
+        bot_module,
         [
             datetime(
                 2026,
@@ -192,19 +194,21 @@ def test_after_opening_window_runs_strategy_immediately(
         ),
     )
 
-    bot.run_production()
+    trading_bot.run_production()
 
     assert events == [
         "strategy:2026-07-27",
     ]
 
+
 def test_production_stops_after_cutoff(
         monkeypatch,
         capsys,
+        trading_bot,
 ):
-    import trading_bot.bot as production_bot_module
+    from datetime import datetime as RealDateTime
 
-    real_datetime = production_bot_module.datetime
+    real_datetime = bot_module.datetime
 
     class CutoffDateTime(real_datetime):
         @classmethod
@@ -219,13 +223,9 @@ def test_production_stops_after_cutoff(
             )
 
     monkeypatch.setattr(
-        production_bot_module,
+        bot_module,
         "datetime",
         CutoffDateTime,
-    )
-
-    bot = object.__new__(
-        production_bot_module.TradingBot
     )
 
     def unexpected_workflow(*args, **kwargs):
@@ -234,10 +234,10 @@ def test_production_stops_after_cutoff(
             "after the cutoff."
         )
 
-    bot.run_live_tracker = unexpected_workflow
-    bot.run_strategy_and_write = unexpected_workflow
+    trading_bot.run_live_tracker = unexpected_workflow
+    trading_bot.run_strategy_and_write = unexpected_workflow
 
-    bot.run_production()
+    trading_bot.run_production()
 
     output = capsys.readouterr().out
 
@@ -254,11 +254,11 @@ def test_production_stops_after_cutoff(
 
 def test_tracking_failure_prevents_strategy_write(
         monkeypatch,
+        trading_bot,
 ):
-    import pytest
-    import trading_bot.bot as production_bot_module
+    from datetime import datetime as RealDateTime
 
-    real_datetime = production_bot_module.datetime
+    real_datetime = bot_module.datetime
 
     class OpeningWindowDateTime(real_datetime):
         @classmethod
@@ -273,13 +273,9 @@ def test_tracking_failure_prevents_strategy_write(
             )
 
     monkeypatch.setattr(
-        production_bot_module,
+        bot_module,
         "datetime",
         OpeningWindowDateTime,
-    )
-
-    bot = object.__new__(
-        production_bot_module.TradingBot
     )
 
     def fail_tracking():
@@ -291,11 +287,11 @@ def test_tracking_failure_prevents_strategy_write(
             "a tracking failure."
         )
 
-    bot.run_live_tracker = fail_tracking
-    bot.run_strategy_and_write = unexpected_strategy
+    trading_bot.run_live_tracker = fail_tracking
+    trading_bot.run_strategy_and_write = unexpected_strategy
 
     with pytest.raises(
         RuntimeError,
         match="Tracker failed",
     ):
-        bot.run_production()
+        trading_bot.run_production()

@@ -7,6 +7,9 @@ from trading_bot.alpaca_client import AlpacaClient
 from trading_bot.models import Stock
 from trading_bot.replay import HistoricalReplay
 
+from conftest import make_bar as _base_make_bar
+from conftest import make_stock
+
 
 UTC = ZoneInfo("UTC")
 
@@ -15,16 +18,45 @@ def make_bar(
         minute: datetime,
         price: float,
 ) -> dict:
-    return {
-        "o": price,
-        "h": price + 0.10,
-        "l": price - 0.10,
-        "c": price + 0.05,
-        "v": 100,
-        "t": minute.strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        ),
-    }
+    """Wrapper around conftest's ``make_bar`` that derives a flat
+    OHLC from a single price (h = price + 0.10, l = price - 0.10,
+    c = price + 0.05, volume = 100). Matches the historical-replay
+    test fixture's shape."""
+    return _base_make_bar(
+        minute,
+        open_price=price,
+        high=price + 0.10,
+        low=price - 0.10,
+        close=price + 0.05,
+        volume=100,
+    )
+
+
+def outcome_bar(
+    timestamp: str,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+) -> dict:
+    return _base_make_bar(
+        timestamp,
+        open_price=open_price,
+        high=high_price,
+        low=low_price,
+        close=close_price,
+        volume=100,
+    )
+
+
+def outcome_stock(symbol: str) -> Stock:
+    return make_stock(
+        symbol,
+        limit_buy=10.0,
+        limit_sell=11.0,
+        stop_loss=9.05,
+        trading_stop_loss=9.0,
+    )
 
 
 class RecordingStrategy:

@@ -1,23 +1,6 @@
 from trading_bot.scanner import StockScanner
-from trading_bot.scanner import StockStats
 
-
-def make_stats(
-        symbol,
-        valid_bars=30,
-        avg_volume=1_000_000,
-        avg_price=10.0,
-        avg_range=0.50,
-        avg_range_pct=5.0,
-):
-    return StockStats(
-        symbol=symbol,
-        valid_bars=valid_bars,
-        avg_volume=avg_volume,
-        avg_price=avg_price,
-        avg_range=avg_range,
-        avg_range_pct=avg_range_pct,
-    )
+from conftest import make_stats
 
 
 def test_scanner_selects_top_three_by_ranking_score():

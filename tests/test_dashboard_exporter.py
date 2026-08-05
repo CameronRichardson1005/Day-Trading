@@ -3,29 +3,7 @@ from trading_bot.dashboard_exporter import (
 )
 from trading_bot.models import Stock
 
-
-def complete_stock(
-        symbol="TEST",
-        signal="INVEST",
-):
-    stock = Stock(symbol=symbol)
-    stock.opening_bar = {
-        "o": 10.0,
-        "h": 11.0,
-        "l": 9.0,
-        "c": 9.5,
-    }
-    stock.atr = 1.0
-    stock.candle_range = 2.0
-    stock.atr_threshold = 0.5
-    stock.is_manipulation = True
-    stock.is_red = True
-    stock.signal = signal
-    stock.limit_buy = 9.0
-    stock.limit_sell = 9.382
-    stock.stop_loss = 8.809
-    stock.trading_stop_loss = 8.759
-    return stock
+from conftest import make_stock
 
 
 def test_complete_invest_includes_levels():
@@ -33,7 +11,7 @@ def test_complete_invest_includes_levels():
         date_str="2026-07-23",
         source="REPLAY",
         stocks={
-            "TEST": complete_stock(),
+            "TEST": make_stock(),
         },
         processed_bars={
             "TEST": 15,
@@ -56,7 +34,7 @@ def test_incomplete_symbol_suppresses_signal_and_levels():
         date_str="2026-07-23",
         source="LIVE",
         stocks={
-            "TEST": complete_stock(),
+            "TEST": make_stock(),
         },
         processed_bars={
             "TEST": 14,
@@ -94,7 +72,7 @@ def test_no_invest_never_includes_levels():
         date_str="2026-07-23",
         source="REPLAY",
         stocks={
-            "TEST": complete_stock(
+            "TEST": make_stock(
                 signal="NO INVEST"
             ),
         },
@@ -121,7 +99,7 @@ def test_publish_skips_when_key_is_missing():
         date_str="2026-07-23",
         source="REPLAY",
         stocks={
-            "TEST": complete_stock(),
+            "TEST": make_stock(),
         },
         processed_bars={
             "TEST": 15,
@@ -160,7 +138,7 @@ def test_publish_uses_read_only_endpoint_contract():
         date_str="2026-07-23",
         source="REPLAY",
         stocks={
-            "TEST": complete_stock(),
+            "TEST": make_stock(),
         },
         processed_bars={
             "TEST": 15,
@@ -182,7 +160,7 @@ def test_publish_uses_read_only_endpoint_contract():
 
 
 def test_complete_invest_includes_outcome():
-    stock = complete_stock()
+    stock = make_stock()
     stock.outcome = {
         "status": "WIN",
         "entryTime": "09:45",

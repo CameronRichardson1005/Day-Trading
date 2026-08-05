@@ -2,16 +2,7 @@ import pytest
 
 from trading_bot.alpaca_client import AlpacaClient
 
-
-def make_bar():
-    return {
-        "o": 10.0,
-        "h": 10.5,
-        "l": 9.5,
-        "c": 10.0,
-        "t": "2026-07-23T13:30:00Z",
-        "v": 1_000_000,
-    }
+from conftest import make_bar
 
 
 def test_market_data_uses_requested_symbols():
@@ -22,8 +13,22 @@ def test_market_data_uses_requested_symbols():
         captured["params"] = params
         return {
             "bars": {
-                "AAA": [make_bar()],
-                "BBB": [make_bar()],
+                "AAA": [make_bar(
+                    "2026-07-23T13:30:00Z",
+                    open_price=10.0,
+                    high=10.5,
+                    low=9.5,
+                    close=10.0,
+                    volume=1_000_000,
+                )],
+                "BBB": [make_bar(
+                    "2026-07-23T13:30:00Z",
+                    open_price=10.0,
+                    high=10.5,
+                    low=9.5,
+                    close=10.0,
+                    volume=1_000_000,
+                )],
             },
         }
 

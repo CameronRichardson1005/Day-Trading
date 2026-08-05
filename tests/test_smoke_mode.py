@@ -3,17 +3,14 @@ from types import SimpleNamespace
 
 import main as main_module
 
-from trading_bot.bot import TradingBot
 
-
-def test_scanner_smoke_writes_only_dashboard():
-    bot = object.__new__(TradingBot)
+def test_scanner_smoke_writes_only_dashboard(trading_bot):
     events = []
     tracker_sentinel = object()
 
-    bot.scanner = object()
-    bot.scanner_statistics = None
-    bot.tracker = tracker_sentinel
+    trading_bot.scanner = object()
+    trading_bot.scanner_statistics = None
+    trading_bot.tracker = tracker_sentinel
 
     class FakeSheets:
         def write_scanner_dashboard(
@@ -36,31 +33,31 @@ def test_scanner_smoke_writes_only_dashboard():
                 )
             )
 
-    bot.sheets = FakeSheets()
+    trading_bot.sheets = FakeSheets()
 
     def fake_refresh(date_str):
         events.append(
             ("refresh", date_str)
         )
-        bot.scanner_statistics = [
+        trading_bot.scanner_statistics = [
             SimpleNamespace(symbol="SNAP"),
         ]
         return ["CORE", "SNAP"]
 
-    bot.refresh_symbols_for_date = fake_refresh
-    bot.run_live_tracker = lambda: events.append(
+    trading_bot.refresh_symbols_for_date = fake_refresh
+    trading_bot.run_live_tracker = lambda: events.append(
         ("forbidden", "tracking")
     )
-    bot.run_strategy_and_write = (
+    trading_bot.run_strategy_and_write = (
         lambda date_str=None: events.append(
             ("forbidden", "strategy")
         )
     )
-    bot.run_production = lambda: events.append(
+    trading_bot.run_production = lambda: events.append(
         ("forbidden", "production")
     )
 
-    succeeded = bot.run_scanner_smoke(
+    succeeded = trading_bot.run_scanner_smoke(
         date_str="2026-07-27"
     )
 
@@ -72,43 +69,42 @@ def test_scanner_smoke_writes_only_dashboard():
             "2026-07-27",
             ("SNAP",),
             ("CORE", "SNAP"),
-            bot.scanner,
+            trading_bot.scanner,
         ),
     ]
-    assert bot.tracker is tracker_sentinel
+    assert trading_bot.tracker is tracker_sentinel
 
 
-def test_scanner_smoke_stops_when_statistics_fail():
-    bot = object.__new__(TradingBot)
+def test_scanner_smoke_stops_when_statistics_fail(trading_bot):
     events = []
     tracker_sentinel = object()
 
-    bot.scanner = object()
-    bot.scanner_statistics = None
-    bot.sheets = None
-    bot.tracker = tracker_sentinel
+    trading_bot.scanner = object()
+    trading_bot.scanner_statistics = None
+    trading_bot.sheets = None
+    trading_bot.tracker = tracker_sentinel
 
     def fake_refresh(date_str):
         events.append(
             ("refresh", date_str)
         )
-        bot.scanner_statistics = None
+        trading_bot.scanner_statistics = None
         return ["CORE"]
 
-    bot.refresh_symbols_for_date = fake_refresh
-    bot.run_live_tracker = lambda: events.append(
+    trading_bot.refresh_symbols_for_date = fake_refresh
+    trading_bot.run_live_tracker = lambda: events.append(
         ("forbidden", "tracking")
     )
-    bot.run_strategy_and_write = (
+    trading_bot.run_strategy_and_write = (
         lambda date_str=None: events.append(
             ("forbidden", "strategy")
         )
     )
-    bot.run_production = lambda: events.append(
+    trading_bot.run_production = lambda: events.append(
         ("forbidden", "production")
     )
 
-    succeeded = bot.run_scanner_smoke(
+    succeeded = trading_bot.run_scanner_smoke(
         date_str="2026-07-27"
     )
 
@@ -116,8 +112,8 @@ def test_scanner_smoke_stops_when_statistics_fail():
     assert events == [
         ("refresh", "2026-07-27"),
     ]
-    assert bot.sheets is None
-    assert bot.tracker is tracker_sentinel
+    assert trading_bot.sheets is None
+    assert trading_bot.tracker is tracker_sentinel
 
 
 def test_main_routes_smoke_mode_only(
