@@ -1,6 +1,8 @@
 from trading_bot.fibonacci_retracement import (
     analyse_retracement_level,
+    analyse_symbol_day_multiple_impulses,
     find_upward_impulse,
+    find_upward_impulses,
     metrics_for,
 )
 
@@ -273,3 +275,264 @@ def test_metrics_cover_profitable_and_losing_trades():
     assert metrics.wins == 1
     assert metrics.losses == 0
     assert metrics.win_rate_pct == 100.0
+
+
+
+def test_finds_multiple_non_overlapping_upward_impulses():
+    bars = [
+        bar(
+            0,
+            open_price=10.00,
+            high=10.05,
+            low=10.00,
+            close=10.03,
+        ),
+        bar(
+            1,
+            open_price=10.03,
+            high=10.60,
+            low=10.02,
+            close=10.55,
+        ),
+        bar(
+            2,
+            open_price=10.55,
+            high=10.58,
+            low=10.40,
+            close=10.45,
+        ),
+        bar(
+            3,
+            open_price=10.45,
+            high=10.48,
+            low=10.40,
+            close=10.44,
+        ),
+        bar(
+            4,
+            open_price=10.44,
+            high=11.05,
+            low=10.42,
+            close=11.00,
+        ),
+    ]
+
+    result = find_upward_impulses(
+        bars,
+        atr=1.0,
+        minimum_atr_multiple=0.50,
+    )
+
+    assert result == [
+        (0, 1),
+        (2, 4),
+    ]
+
+
+def test_multiple_impulse_search_returns_independent_later_move():
+    bars = [
+        bar(
+            0,
+            open_price=10.00,
+            high=10.05,
+            low=10.00,
+            close=10.04,
+        ),
+        bar(
+            1,
+            open_price=10.04,
+            high=10.55,
+            low=10.02,
+            close=10.50,
+        ),
+        bar(
+            2,
+            open_price=10.50,
+            high=10.90,
+            low=10.45,
+            close=10.85,
+        ),
+        bar(
+            3,
+            open_price=10.85,
+            high=11.20,
+            low=10.80,
+            close=11.15,
+        ),
+    ]
+
+    result = find_upward_impulses(
+        bars,
+        atr=1.0,
+        minimum_atr_multiple=0.50,
+    )
+
+    assert result == [
+        (0, 1),
+        (2, 3),
+    ]
+
+
+def test_multiple_impulse_analysis_evaluates_each_impulse():
+    bars = [
+        bar(
+            0,
+            open_price=10.00,
+            high=10.05,
+            low=10.00,
+            close=10.03,
+            volume=2000,
+        ),
+        bar(
+            1,
+            open_price=10.03,
+            high=10.60,
+            low=10.02,
+            close=10.55,
+            volume=2200,
+        ),
+        bar(
+            2,
+            open_price=10.55,
+            high=10.58,
+            low=10.25,
+            close=10.30,
+            volume=900,
+        ),
+        bar(
+            3,
+            open_price=10.30,
+            high=10.42,
+            low=10.25,
+            close=10.40,
+            volume=800,
+        ),
+        bar(
+            4,
+            open_price=10.40,
+            high=10.45,
+            low=10.40,
+            close=10.43,
+            volume=1800,
+        ),
+        bar(
+            5,
+            open_price=10.43,
+            high=11.05,
+            low=10.42,
+            close=11.00,
+            volume=2000,
+        ),
+        bar(
+            6,
+            open_price=11.00,
+            high=11.02,
+            low=10.65,
+            close=10.70,
+            volume=700,
+        ),
+        bar(
+            7,
+            open_price=10.70,
+            high=10.82,
+            low=10.65,
+            close=10.80,
+            volume=650,
+        ),
+    ]
+
+    records = analyse_symbol_day_multiple_impulses(
+        date_str="2026-07-30",
+        symbol="TEST",
+        data_feed="iex",
+        bars=bars,
+        atr=1.0,
+        minimum_impulse_atr=0.50,
+    )
+
+    # Two impulses multiplied by the three configured
+    # Fibonacci retracement levels.
+    assert len(records) == 6
+
+    detected_impulses = find_upward_impulses(
+        bars,
+        atr=1.0,
+        minimum_atr_multiple=0.50,
+    )
+
+    assert detected_impulses == [
+        (0, 1),
+        (2, 5),
+    ]
+
+    # Rejected retracement records currently use _empty_setup(),
+    # which intentionally leaves impulse timestamps blank. Records
+    # that progress far enough retain their selected impulse times.
+    populated_impulse_pairs = {
+        (
+            record.impulse_start_time,
+            record.impulse_end_time,
+        )
+        for record in records
+        if record.impulse_start_time
+    }
+
+    assert populated_impulse_pairs == {
+        ("09:30", "09:31"),
+        ("09:32", "09:35"),
+    }
+
+
+def test_existing_single_impulse_behavior_is_unchanged():
+    bars = [
+        bar(
+            0,
+            open_price=10.00,
+            high=10.05,
+            low=10.00,
+            close=10.03,
+        ),
+        bar(
+            1,
+            open_price=10.03,
+            high=10.60,
+            low=10.02,
+            close=10.55,
+        ),
+        bar(
+            2,
+            open_price=10.55,
+            high=10.58,
+            low=10.40,
+            close=10.45,
+        ),
+        bar(
+            3,
+            open_price=10.45,
+            high=10.48,
+            low=10.40,
+            close=10.44,
+        ),
+        bar(
+            4,
+            open_price=10.44,
+            high=11.05,
+            low=10.42,
+            close=11.00,
+        ),
+    ]
+
+    assert find_upward_impulse(
+        bars,
+        atr=1.0,
+        minimum_atr_multiple=0.50,
+    ) == (0, 1)
+
+    assert find_upward_impulses(
+        bars,
+        atr=1.0,
+        minimum_atr_multiple=0.50,
+    ) == [
+        (0, 1),
+        (2, 4),
+    ]

@@ -300,6 +300,87 @@ def find_upward_impulse(
     return None
 
 
+def find_upward_impulses(
+    bars: list[dict[str, Any]],
+    *,
+    atr: float,
+    minimum_atr_multiple: float = 1.0,
+) -> list[tuple[int, int]]:
+    """
+    Find chronological, non-overlapping upward impulses.
+
+    This is research-only. The active strategy continues to use
+    find_upward_impulse(), which selects only the first qualifying
+    impulse.
+
+    After one impulse qualifies, the next search begins after that
+    impulse's high bar. This avoids overlapping duplicate candidates
+    while preserving chronological ordering and preventing look-ahead
+    selection.
+    """
+    if atr <= 0 or minimum_atr_multiple <= 0:
+        return []
+
+    candidates = [
+        (index, bar)
+        for index, bar in enumerate(bars)
+        if (
+            _timestamp(bar).hour < 10
+            or (
+                _timestamp(bar).hour == 10
+                and _timestamp(bar).minute <= 30
+            )
+        )
+    ]
+
+    if len(candidates) < 2:
+        return []
+
+    required_move = atr * minimum_atr_multiple
+    impulses: list[tuple[int, int]] = []
+    search_position = 0
+
+    while search_position < len(candidates) - 1:
+        running_low_index = candidates[search_position][0]
+        running_low = float(
+            candidates[search_position][1]["l"]
+        )
+        found_position = None
+
+        for candidate_position in range(
+            search_position + 1,
+            len(candidates),
+        ):
+            index, bar = candidates[candidate_position]
+            low = float(bar["l"])
+            high = float(bar["h"])
+
+            if low < running_low:
+                running_low = low
+                running_low_index = index
+
+            move = high - running_low
+
+            if (
+                index > running_low_index
+                and move >= required_move
+            ):
+                impulses.append(
+                    (running_low_index, index)
+                )
+                found_position = candidate_position
+                break
+
+        if found_position is None:
+            break
+
+        # Begin the next independent search after the high bar
+        # of the impulse that was just selected.
+        search_position = found_position + 1
+
+    return impulses
+
+
 def _simulate_confirmed_trade(
     *,
     bars: list[dict[str, Any]],
@@ -516,6 +597,7 @@ def analyse_retracement_level(
     tick_size: float = 0.01,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
+    impulse_indices: tuple[int, int] | None = None,
 ) -> RetracementSetup:
     bars = sorted(bars, key=lambda bar: str(bar["t"]))
 
@@ -530,10 +612,14 @@ def analyse_retracement_level(
             reason="ATR_UNAVAILABLE",
         )
 
-    impulse = find_upward_impulse(
-        bars,
-        atr=atr,
-        minimum_atr_multiple=minimum_impulse_atr,
+    impulse = (
+        impulse_indices
+        if impulse_indices is not None
+        else find_upward_impulse(
+            bars,
+            atr=atr,
+            minimum_atr_multiple=minimum_impulse_atr,
+        )
     )
 
     if impulse is None:
@@ -548,6 +634,22 @@ def analyse_retracement_level(
         )
 
     low_index, high_index = impulse
+
+    if (
+        low_index < 0
+        or high_index >= len(bars)
+        or high_index <= low_index
+    ):
+        return _empty_setup(
+            date_str=date_str,
+            symbol=symbol,
+            data_feed=data_feed,
+            level_name=level_name,
+            ratio=ratio,
+            atr=atr,
+            reason="INVALID_IMPULSE_INDICES",
+        )
+
     impulse_low_bar = bars[low_index]
     impulse_high_bar = bars[high_index]
 
@@ -844,6 +946,95 @@ def analyse_symbol_day(
             FIBONACCI_LEVELS.items()
         )
     ]
+
+
+def analyse_symbol_day_multiple_impulses(
+    *,
+    date_str: str,
+    symbol: str,
+    data_feed: str,
+    bars: list[dict[str, Any]],
+    atr: float | None,
+    minimum_impulse_atr: float = 1.0,
+    slippage_bps: float = 0.0,
+    commission_per_share: float = 0.0,
+) -> list[RetracementSetup]:
+    """
+    Evaluate each chronological non-overlapping impulse for every
+    Fibonacci level.
+
+    This function is research-only and is not used by the active
+    live strategy, Google Sheets, dashboard publishing, Webull
+    previews, or order generation.
+    """
+    sorted_bars = sorted(
+        bars,
+        key=lambda bar: str(bar["t"]),
+    )
+
+    if atr is None or atr <= 0:
+        return [
+            _empty_setup(
+                date_str=date_str,
+                symbol=symbol,
+                data_feed=data_feed,
+                level_name=level_name,
+                ratio=ratio,
+                atr=atr,
+                reason="ATR_UNAVAILABLE",
+            )
+            for level_name, ratio
+            in FIBONACCI_LEVELS.items()
+        ]
+
+    impulses = find_upward_impulses(
+        sorted_bars,
+        atr=atr,
+        minimum_atr_multiple=minimum_impulse_atr,
+    )
+
+    if not impulses:
+        return [
+            _empty_setup(
+                date_str=date_str,
+                symbol=symbol,
+                data_feed=data_feed,
+                level_name=level_name,
+                ratio=ratio,
+                atr=atr,
+                reason="NO_QUALIFYING_UPWARD_IMPULSE",
+            )
+            for level_name, ratio
+            in FIBONACCI_LEVELS.items()
+        ]
+
+    records: list[RetracementSetup] = []
+
+    for impulse_indices in impulses:
+        for level_name, ratio in (
+            FIBONACCI_LEVELS.items()
+        ):
+            records.append(
+                analyse_retracement_level(
+                    date_str=date_str,
+                    symbol=symbol,
+                    data_feed=data_feed,
+                    bars=sorted_bars,
+                    atr=atr,
+                    level_name=level_name,
+                    ratio=ratio,
+                    minimum_impulse_atr=(
+                        minimum_impulse_atr
+                    ),
+                    slippage_bps=slippage_bps,
+                    commission_per_share=(
+                        commission_per_share
+                    ),
+                    impulse_indices=impulse_indices,
+                )
+            )
+
+    return records
 
 
 def metrics_for(

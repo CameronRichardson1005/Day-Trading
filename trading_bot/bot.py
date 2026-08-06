@@ -1,3 +1,4 @@
+import csv
 import os
 import time as time_module
 
@@ -16,8 +17,10 @@ from .fibonacci_paper import (
     build_fibonacci_paper_record,
 )
 from .fibonacci_retracement import (
+    FIBONACCI_LEVELS,
     FibonacciRetracementReport,
     analyse_symbol_day,
+    analyse_symbol_day_multiple_impulses,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
 
@@ -1836,6 +1839,7 @@ class TradingBot:
         slippage_bps: float = 0.0,
         commission_per_share: float = 0.0,
         minimum_impulse_atr: float = 1.0,
+        multiple_impulses: bool = False,
     ) -> FibonacciRetracementReport:
         """
         Study genuine upward impulses followed by Fibonacci
@@ -1912,6 +1916,14 @@ class TradingBot:
             f"{minimum_impulse_atr:.2f} ATR"
         )
         print(
+            "Impulse selection:",
+            (
+                "MULTIPLE NON-OVERLAPPING IMPULSES"
+                if multiple_impulses
+                else "FIRST QUALIFYING IMPULSE"
+            ),
+        )
+        print(
             "READ-ONLY MODE: Google Sheets, dashboard, "
             "Webull, previews, and orders are disabled."
         )
@@ -1964,8 +1976,14 @@ class TradingBot:
 
                 before_count = len(report.records)
 
+                analyser = (
+                    analyse_symbol_day_multiple_impulses
+                    if multiple_impulses
+                    else analyse_symbol_day
+                )
+
                 for symbol in self.stocks:
-                    records = analyse_symbol_day(
+                    records = analyser(
                         date_str=date_str,
                         symbol=symbol,
                         data_feed=data_feed,
@@ -2068,6 +2086,211 @@ class TradingBot:
         print(f"Failed sessions: {failures_path}")
 
         return report
+
+    def run_fibonacci_impulse_comparison(
+        self,
+        start_date: str,
+        end_date: str,
+        output_directory: str | Path = (
+            "reports/fibonacci-impulse-comparison"
+        ),
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 15.0,
+        commission_per_share: float = 0.0,
+        minimum_impulse_atr: float = 0.50,
+    ) -> tuple[
+        FibonacciRetracementReport,
+        FibonacciRetracementReport,
+    ]:
+        """
+        Compare the current first-impulse research method with the
+        research-only multiple-impulse method.
+
+        This workflow cannot write Google Sheets, publish dashboard
+        sessions, call Webull, create previews, or submit orders.
+        """
+        output_directory = Path(output_directory)
+
+        print()
+        print("===================================")
+        print(" Fibonacci Impulse Comparison")
+        print("===================================")
+        print(
+            f"Date range: {start_date} to {end_date}"
+        )
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            f"Modeled slippage: {slippage_bps:.1f} bps"
+        )
+        print(
+            "READ-ONLY MODE: Google Sheets, dashboard, Webull, "
+            "previews, and orders are disabled."
+        )
+
+        print()
+        print("Running current first-impulse method...")
+
+        first_report = (
+            self.run_fibonacci_retracement_research(
+                start_date=start_date,
+                end_date=end_date,
+                output_directory=(
+                    output_directory / "first-impulse"
+                ),
+                data_feed=data_feed,
+                slippage_bps=slippage_bps,
+                commission_per_share=(
+                    commission_per_share
+                ),
+                minimum_impulse_atr=(
+                    minimum_impulse_atr
+                ),
+                multiple_impulses=False,
+            )
+        )
+
+        print()
+        print(
+            "Running research-only multiple-impulse method..."
+        )
+
+        multiple_report = (
+            self.run_fibonacci_retracement_research(
+                start_date=start_date,
+                end_date=end_date,
+                output_directory=(
+                    output_directory / "multiple-impulses"
+                ),
+                data_feed=data_feed,
+                slippage_bps=slippage_bps,
+                commission_per_share=(
+                    commission_per_share
+                ),
+                minimum_impulse_atr=(
+                    minimum_impulse_atr
+                ),
+                multiple_impulses=True,
+            )
+        )
+
+        output_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        comparison_path = (
+            output_directory
+            / "fibonacci_impulse_comparison_summary.csv"
+        )
+
+        rows = []
+
+        for method_name, report in (
+            ("FIRST_IMPULSE", first_report),
+            ("MULTIPLE_IMPULSES", multiple_report),
+        ):
+            for summary in report.summary_rows():
+                if summary.get("scope") != "LEVEL":
+                    continue
+
+                rows.append({
+                    "method": method_name,
+                    "fibonacci_level": (
+                        summary["fibonacci_level"]
+                    ),
+                    "setups": summary["setups"],
+                    "entered_trades": (
+                        summary["entered_trades"]
+                    ),
+                    "wins": summary["wins"],
+                    "losses": summary["losses"],
+                    "no_entry": summary["no_entry"],
+                    "rejected_reward_risk": (
+                        summary["rejected_reward_risk"]
+                    ),
+                    "win_rate_pct": (
+                        summary["win_rate_pct"]
+                    ),
+                    "average_return_pct": (
+                        summary["average_return_pct"]
+                    ),
+                    "total_return_pct": (
+                        summary["total_return_pct"]
+                    ),
+                    "profit_factor": (
+                        summary["profit_factor"]
+                    ),
+                    "expectancy_pct": (
+                        summary["expectancy_pct"]
+                    ),
+                    "maximum_drawdown_pct_points": (
+                        summary[
+                            "maximum_drawdown_pct_points"
+                        ]
+                    ),
+                })
+
+        if not rows:
+            raise RuntimeError(
+                "Impulse comparison produced no summary rows."
+            )
+
+        with comparison_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=list(rows[0].keys()),
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+
+        print()
+        print("===== IMPULSE COMPARISON COMPLETE =====")
+
+        for level_name in FIBONACCI_LEVELS:
+            first = next(
+                row
+                for row in rows
+                if (
+                    row["method"] == "FIRST_IMPULSE"
+                    and row["fibonacci_level"]
+                    == level_name
+                )
+            )
+
+            multiple = next(
+                row
+                for row in rows
+                if (
+                    row["method"] == "MULTIPLE_IMPULSES"
+                    and row["fibonacci_level"]
+                    == level_name
+                )
+            )
+
+            print()
+            print(level_name)
+            print(
+                "First impulse:",
+                f"{first['entered_trades']} entries,",
+                f"{first['win_rate_pct']}% win rate,",
+                f"{first['expectancy_pct']}% expectancy",
+            )
+            print(
+                "Multiple impulses:",
+                f"{multiple['entered_trades']} entries,",
+                f"{multiple['win_rate_pct']}% win rate,",
+                f"{multiple['expectancy_pct']}% expectancy",
+            )
+
+        print()
+        print(f"Comparison summary: {comparison_path}")
+        print("No real orders were submitted.")
+
+        return first_report, multiple_report
 
     def run_fibonacci_research(
         self,
