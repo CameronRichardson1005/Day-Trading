@@ -206,6 +206,109 @@ def parse_account_balance(
         label="Account balance",
     )
 
+    currency_assets = balance.get(
+        "account_currency_assets"
+    )
+
+    if currency_assets is not None:
+        if not isinstance(currency_assets, list):
+            raise WebullResponseError(
+                "Account currency assets must be a list."
+            )
+
+        if not all(
+            isinstance(asset, dict)
+            for asset in currency_assets
+        ):
+            raise WebullResponseError(
+                "Account currency asset records "
+                "must be objects."
+            )
+
+        usd_assets = [
+            asset
+            for asset in currency_assets
+            if str(
+                asset.get("currency", "")
+            ).strip().upper() == "USD"
+        ]
+
+        if len(usd_assets) != 1:
+            raise WebullResponseError(
+                "Exactly one USD account currency "
+                "asset is required."
+            )
+
+        total_asset_currency = str(
+            balance.get(
+                "total_asset_currency",
+                "",
+            )
+        ).strip().upper()
+
+        if (
+            total_asset_currency
+            and total_asset_currency != "USD"
+        ):
+            raise WebullResponseError(
+                "Total asset currency must be USD."
+            )
+
+        usd_asset = usd_assets[0]
+
+        settled_cash = _number(
+            _first_present(
+                usd_asset,
+                (
+                    "settled_cash",
+                    "settledCash",
+                ),
+                label="USD settled cash",
+            ),
+            label="USD settled cash",
+        )
+
+        cash_balance = _number(
+            _first_present(
+                usd_asset,
+                (
+                    "cash_balance",
+                    "cashBalance",
+                ),
+                label="USD cash balance",
+            ),
+            label="USD cash balance",
+        )
+
+        cash_candidates = [
+            settled_cash,
+            cash_balance,
+        ]
+
+        if (
+            "total_cash_balance" in balance
+            and balance["total_cash_balance"]
+            not in {None, ""}
+        ):
+            cash_candidates.append(
+                _number(
+                    balance["total_cash_balance"],
+                    label="Total cash balance",
+                )
+            )
+
+        # Fail-safe rule: use the most conservative confirmed
+        # cash figure. Never use buying power, option buying
+        # power, or unsettled cash.
+        available_cash = min(cash_candidates)
+
+        return ParsedWebullBalance(
+            available_cash=round(
+                available_cash,
+                2,
+            ),
+        )
+
     nested = balance.get("data")
 
     if isinstance(nested, dict):
@@ -219,6 +322,8 @@ def parse_account_balance(
                 "availableCash",
                 "cash_available",
                 "cashAvailable",
+                "settled_cash",
+                "settledCash",
                 "cash_balance",
                 "cashBalance",
             ),
@@ -228,9 +333,11 @@ def parse_account_balance(
     )
 
     return ParsedWebullBalance(
-        available_cash=available_cash,
+        available_cash=round(
+            available_cash,
+            2,
+        ),
     )
-
 
 def parse_positions(
     payload: Any,
@@ -307,24 +414,28 @@ def parse_positions(
                 )
                 break
 
-        if (
-            raw_market_value is not None
-            and abs(
-                raw_market_value
-                - calculated_value
-            ) > 0.05
-        ):
-            raise WebullResponseError(
-                f"{symbol} market value did not match "
-                "quantity multiplied by market price."
+        # Webull may calculate market value and market price
+        # at slightly different moments or precision levels.
+        # Use the larger confirmed value so exposure is never
+        # understated.
+        conservative_market_value = (
+            calculated_value
+            if raw_market_value is None
+            else max(
+                calculated_value,
+                raw_market_value,
             )
+        )
 
         parsed.append(
             ParsedWebullPosition(
                 symbol=symbol,
                 quantity=quantity,
                 market_price=market_price,
-                market_value=calculated_value,
+                market_value=round(
+                    conservative_market_value,
+                    2,
+                ),
             )
         )
 
@@ -334,7 +445,7 @@ def parse_positions(
 def parse_open_orders(
     payload: Any,
 ) -> list[ParsedWebullOpenOrder]:
-    orders = _records(
+    raw_records = _records(
         payload,
         possible_keys=(
             "orders",
@@ -344,6 +455,30 @@ def parse_open_orders(
         ),
         label="Open orders",
     )
+
+    orders: list[dict[str, Any]] = []
+
+    for record in raw_records:
+        nested_orders = record.get("orders")
+
+        if nested_orders is None:
+            orders.append(record)
+            continue
+
+        if not isinstance(nested_orders, list):
+            raise WebullResponseError(
+                "Nested open orders must be a list."
+            )
+
+        if not all(
+            isinstance(order, dict)
+            for order in nested_orders
+        ):
+            raise WebullResponseError(
+                "Nested open-order records must be objects."
+            )
+
+        orders.extend(nested_orders)
 
     parsed: list[ParsedWebullOpenOrder] = []
 
@@ -380,6 +515,8 @@ def parse_open_orders(
             _first_present(
                 order,
                 (
+                    "total_quantity",
+                    "totalQuantity",
                     "quantity",
                     "order_quantity",
                     "orderQuantity",
@@ -398,25 +535,13 @@ def parse_open_orders(
             "filled_qty",
             "filledQty",
         ):
-            if key in order:
+            if (
+                key in order
+                and order[key] not in {None, ""}
+            ):
                 filled_quantity = _number(
                     order[key],
                     label=f"{symbol} filled quantity",
-                )
-                break
-
-        remaining_value = None
-
-        for key in (
-            "remain_quantity",
-            "remainQuantity",
-            "remaining_quantity",
-            "remainingQuantity",
-        ):
-            if key in order:
-                remaining_value = _number(
-                    order[key],
-                    label=f"{symbol} remaining quantity",
                 )
                 break
 
@@ -430,10 +555,28 @@ def parse_open_orders(
                 "the order quantity."
             )
 
+        remaining_value = None
+
+        for key in (
+            "remain_quantity",
+            "remainQuantity",
+            "remaining_quantity",
+            "remainingQuantity",
+        ):
+            if (
+                key in order
+                and order[key] not in {None, ""}
+            ):
+                remaining_value = _number(
+                    order[key],
+                    label=f"{symbol} remaining quantity",
+                )
+                break
+
         remaining_quantity = (
-            remaining_value
-            if remaining_value is not None
-            else calculated_remaining
+            calculated_remaining
+            if remaining_value is None
+            else remaining_value
         )
 
         if (

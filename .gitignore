@@ -34,3 +34,7 @@ webull_trade_sdk.log*
 
 # Local migration backups
 backups/
+
+# Webull SDK authentication cache
+conf/token.txt
+webull_trade_sdk.log
