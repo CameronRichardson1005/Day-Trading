@@ -374,3 +374,148 @@ def test_expired_proposal_is_not_active_duplicate():
     clock.advance(61)
 
     assert not queue.has_active_duplicate(order)
+
+
+def test_paper_claim_consumes_approved_ticket():
+    queue, ticket, order = approved_ticket()
+
+    decision = queue.claim_for_paper_submission(
+        approval_id=ticket.approval_id,
+        approval_token=ticket.approval_token,
+        proposal=order,
+        current_account=cash_account(),
+    )
+
+    assert decision.allowed
+    assert queue.status(ticket.approval_id) == (
+        "CONSUMED"
+    )
+
+
+def test_paper_claim_does_not_require_real_submission_flags():
+    queue, ticket, order = approved_ticket()
+
+    with (
+        patch(
+            "trading_bot.webull_approval."
+            "WEBULL_TRADING_KILL_SWITCH",
+            True,
+        ),
+        patch(
+            "trading_bot.webull_approval."
+            "WEBULL_ORDER_SUBMISSION_ENABLED",
+            False,
+        ),
+    ):
+        decision = queue.claim_for_paper_submission(
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+            proposal=order,
+            current_account=cash_account(),
+        )
+
+    assert decision.allowed
+
+
+def test_paper_claim_rejects_changed_order():
+    queue, ticket, _ = approved_ticket()
+
+    changed = proposal(quantity=11)
+
+    with pytest.raises(
+        WebullApprovalError,
+        match="ORDER_CHANGED_AFTER_APPROVAL",
+    ):
+        queue.claim_for_paper_submission(
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+            proposal=changed,
+            current_account=cash_account(),
+        )
+
+
+def test_paper_claim_rechecks_current_account():
+    queue, ticket, order = approved_ticket()
+
+    changed_account = cash_account(
+        position_exposure=470.0,
+    )
+
+    with pytest.raises(
+        WebullApprovalError,
+        match="FINAL_SAFETY_RECHECK_FAILED",
+    ):
+        queue.claim_for_paper_submission(
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+            proposal=order,
+            current_account=changed_account,
+        )
+
+
+def test_paper_claim_can_only_be_consumed_once():
+    queue, ticket, order = approved_ticket()
+
+    queue.claim_for_paper_submission(
+        approval_id=ticket.approval_id,
+        approval_token=ticket.approval_token,
+        proposal=order,
+        current_account=cash_account(),
+    )
+
+    with pytest.raises(
+        WebullApprovalError,
+        match="APPROVAL_ALREADY_CONSUMED",
+    ):
+        queue.claim_for_paper_submission(
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+            proposal=order,
+            current_account=cash_account(),
+        )
+
+
+def test_failed_paper_persistence_can_restore_approval():
+    queue, ticket, order = approved_ticket()
+
+    queue.claim_for_paper_submission(
+        approval_id=ticket.approval_id,
+        approval_token=ticket.approval_token,
+        proposal=order,
+        current_account=cash_account(),
+    )
+
+    assert queue.status(ticket.approval_id) == (
+        "CONSUMED"
+    )
+
+    queue.restore_after_failed_paper_submission(
+        approval_id=ticket.approval_id,
+        approval_token=ticket.approval_token,
+        proposal=order,
+    )
+
+    assert queue.status(ticket.approval_id) == (
+        "APPROVED"
+    )
+
+
+def test_paper_restore_rejects_changed_proposal():
+    queue, ticket, order = approved_ticket()
+
+    queue.claim_for_paper_submission(
+        approval_id=ticket.approval_id,
+        approval_token=ticket.approval_token,
+        proposal=order,
+        current_account=cash_account(),
+    )
+
+    with pytest.raises(
+        WebullApprovalError,
+        match="ORDER_CHANGED_AFTER_APPROVAL",
+    ):
+        queue.restore_after_failed_paper_submission(
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+            proposal=proposal(quantity=11),
+        )

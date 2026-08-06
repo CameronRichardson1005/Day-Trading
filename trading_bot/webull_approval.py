@@ -415,6 +415,117 @@ class WebullApprovalQueue:
 
         return final_decision
 
+    def claim_for_paper_submission(
+        self,
+        *,
+        approval_id: str,
+        approval_token: str,
+        proposal: WebullOrderProposal,
+        current_account: WebullAccountState,
+    ) -> WebullSafetyDecision:
+        """
+        Consume an approved ticket for a local simulated
+        paper order.
+
+        This method performs no broker action and does not alter
+        the real-order submission kill switch or enablement flag.
+        """
+        record = self._get_record(approval_id)
+        self._verify_token(
+            record,
+            approval_token,
+        )
+        self._reject_if_expired(record)
+
+        if record.status == "CONSUMED":
+            raise WebullApprovalError(
+                "APPROVAL_ALREADY_CONSUMED"
+            )
+
+        if record.status != "APPROVED":
+            raise WebullApprovalError(
+                "APPROVAL_NOT_APPROVED"
+            )
+
+        current_fingerprint = (
+            self._proposal_fingerprint(proposal)
+        )
+
+        if not hmac.compare_digest(
+            record.proposal_fingerprint,
+            current_fingerprint,
+        ):
+            raise WebullApprovalError(
+                "ORDER_CHANGED_AFTER_APPROVAL"
+            )
+
+        approved_proposal = WebullOrderProposal(
+            symbol=proposal.symbol,
+            side=proposal.side,
+            quantity=proposal.quantity,
+            limit_price=proposal.limit_price,
+            manually_approved=True,
+        )
+
+        final_decision = WebullSafetyGate.evaluate(
+            account=current_account,
+            proposal=approved_proposal,
+        )
+
+        if not final_decision.allowed:
+            raise WebullApprovalError(
+                "FINAL_SAFETY_RECHECK_FAILED:"
+                f"{final_decision.reason}"
+            )
+
+        record.status = "CONSUMED"
+        record.consumed_at = self._clock()
+        self._persist()
+
+        return final_decision
+
+    def restore_after_failed_paper_submission(
+        self,
+        *,
+        approval_id: str,
+        approval_token: str,
+        proposal: WebullOrderProposal,
+    ) -> None:
+        """
+        Restore a just-consumed paper approval when durable local
+        paper-order persistence failed.
+
+        This method performs no broker action. It may only restore
+        a CONSUMED approval whose exact proposal and token still
+        match.
+        """
+        record = self._get_record(approval_id)
+        self._verify_token(
+            record,
+            approval_token,
+        )
+
+        if record.status != "CONSUMED":
+            raise WebullApprovalError(
+                "APPROVAL_NOT_CONSUMED"
+            )
+
+        current_fingerprint = (
+            self._proposal_fingerprint(proposal)
+        )
+
+        if not hmac.compare_digest(
+            record.proposal_fingerprint,
+            current_fingerprint,
+        ):
+            raise WebullApprovalError(
+                "ORDER_CHANGED_AFTER_APPROVAL"
+            )
+
+        record.status = "APPROVED"
+        record.consumed_at = None
+        self._persist()
+
     @staticmethod
     def _public_datetime(
         value: datetime | None,

@@ -64,6 +64,13 @@ from .config import (
 from .dashboard_exporter import DashboardExporter
 from .models import Stock
 from .webull_safety import WebullOrderProposal
+from .webull_paper_order_service import (
+    WebullPaperOrderService,
+    WebullPaperOrderServiceError,
+)
+from .webull_paper_order_store import (
+    WebullPaperOrderRecord,
+)
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
@@ -3735,6 +3742,35 @@ class TradingBot:
         return self.webull_approval_queue.create(
             proposal=proposal,
             account=account,
+        )
+
+    def submit_webull_paper_order(
+            self,
+            *,
+            symbol: str,
+            approval_id: str,
+            approval_token: str,
+    ) -> WebullPaperOrderRecord:
+        """
+        Record a locally simulated Webull paper order from an
+        approved preview.
+
+        This method performs no broker submission, replacement,
+        modification, or cancellation.
+        """
+        if self.webull_approval_queue is None:
+            raise WebullPaperOrderServiceError(
+                "APPROVAL_STORE_UNAVAILABLE"
+            )
+
+        service = WebullPaperOrderService(
+            approval_queue=self.webull_approval_queue,
+        )
+
+        return service.submit_paper_order(
+            symbol=symbol,
+            approval_id=approval_id,
+            approval_token=approval_token,
         )
 
     def prepare_webull_previews(
