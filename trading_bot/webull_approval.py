@@ -13,6 +13,10 @@ from .config import (
     WEBULL_ORDER_SUBMISSION_ENABLED,
     WEBULL_TRADING_KILL_SWITCH,
 )
+from .webull_approval_store import (
+    StoredApprovalRecord,
+    WebullApprovalStore,
+)
 from .webull_safety import (
     WebullAccountState,
     WebullOrderProposal,
@@ -67,6 +71,7 @@ class WebullApprovalQueue:
         *,
         clock: Callable[[], datetime] | None = None,
         ttl_seconds: int = WEBULL_APPROVAL_TTL_SECONDS,
+        store: WebullApprovalStore | None = None,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError(
@@ -77,7 +82,90 @@ class WebullApprovalQueue:
             lambda: datetime.now(UTC)
         )
         self._ttl_seconds = ttl_seconds
+        self._store = store
         self._records: dict[str, _ApprovalRecord] = {}
+
+        if self._store is not None:
+            stored_records = self._store.load()
+
+            self._records = {
+                approval_id: self._from_stored(record)
+                for approval_id, record
+                in stored_records.items()
+            }
+
+            self._expire_loaded_records()
+
+    @staticmethod
+    def _from_stored(
+        record: StoredApprovalRecord,
+    ) -> _ApprovalRecord:
+        return _ApprovalRecord(
+            approval_id=record.approval_id,
+            token_hash=record.token_hash,
+            proposal_fingerprint=(
+                record.proposal_fingerprint
+            ),
+            symbol=record.symbol,
+            quantity=record.quantity,
+            limit_price=record.limit_price,
+            proposed_exposure=(
+                record.proposed_exposure
+            ),
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            status=record.status,
+            approved_at=record.approved_at,
+            consumed_at=record.consumed_at,
+        )
+
+    @staticmethod
+    def _to_stored(
+        record: _ApprovalRecord,
+    ) -> StoredApprovalRecord:
+        return StoredApprovalRecord(
+            approval_id=record.approval_id,
+            token_hash=record.token_hash,
+            proposal_fingerprint=(
+                record.proposal_fingerprint
+            ),
+            symbol=record.symbol,
+            quantity=record.quantity,
+            limit_price=record.limit_price,
+            proposed_exposure=(
+                record.proposed_exposure
+            ),
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            status=record.status,
+            approved_at=record.approved_at,
+            consumed_at=record.consumed_at,
+        )
+
+    def _persist(self) -> None:
+        if self._store is None:
+            return
+
+        self._store.save({
+            approval_id: self._to_stored(record)
+            for approval_id, record
+            in self._records.items()
+        })
+
+    def _expire_loaded_records(self) -> None:
+        now = self._clock()
+        changed = False
+
+        for record in self._records.values():
+            if (
+                record.status in {"PENDING", "APPROVED"}
+                and now >= record.expires_at
+            ):
+                record.status = "EXPIRED"
+                changed = True
+
+        if changed:
+            self._persist()
 
     @staticmethod
     def _token_hash(token: str) -> str:
@@ -187,6 +275,7 @@ class WebullApprovalQueue:
         )
 
         self._records[approval_id] = record
+        self._persist()
 
         return WebullApprovalTicket(
             approval_id=approval_id,
@@ -229,6 +318,7 @@ class WebullApprovalQueue:
 
         record.status = "APPROVED"
         record.approved_at = self._clock()
+        self._persist()
 
     def claim_for_submission(
         self,
@@ -298,6 +388,7 @@ class WebullApprovalQueue:
 
         record.status = "CONSUMED"
         record.consumed_at = self._clock()
+        self._persist()
 
         return final_decision
 
@@ -312,5 +403,6 @@ class WebullApprovalQueue:
             and self._clock() >= record.expires_at
         ):
             record.status = "EXPIRED"
+            self._persist()
 
         return record.status

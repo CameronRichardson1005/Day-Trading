@@ -38,3 +38,11 @@ backups/
 # Webull SDK authentication cache
 conf/token.txt
 webull_trade_sdk.log
+
+# Local Webull approval state
+runtime/webull_approvals.json
+runtime/webull_approvals.json.tmp
+
+# Local Webull approval state
+runtime/webull_approvals.json
+runtime/webull_approvals.json.tmp

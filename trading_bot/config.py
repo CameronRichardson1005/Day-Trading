@@ -279,3 +279,25 @@ if WEBULL_APPROVAL_TTL_SECONDS <= 0:
 # this remains active, but no approved order can be claimed
 # for submission.
 WEBULL_TRADING_KILL_SWITCH = True
+
+WEBULL_APPROVAL_STORE_FILE = Path(
+    os.getenv(
+        "WEBULL_APPROVAL_STORE_FILE",
+        str(
+            PROJECT_ROOT
+            / "runtime"
+            / "webull_approvals.json"
+        ),
+    )
+)
+
+WEBULL_APPROVAL_STORE_FILE = Path(
+    os.getenv(
+        "WEBULL_APPROVAL_STORE_FILE",
+        str(
+            PROJECT_ROOT
+            / "runtime"
+            / "webull_approvals.json"
+        ),
+    )
+)
