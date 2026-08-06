@@ -1,40 +1,25 @@
 import sys
-from dataclasses import dataclass
 from unittest.mock import patch
 
 import main
-
-
-@dataclass(frozen=True)
-class FakePaperOrder:
-    paper_order_id: str = "paper-1"
-    symbol: str = "OPEN"
-    side: str = "BUY"
-    quantity: int = 10
-    limit_price: float = 4.25
-    proposed_exposure: float = 42.50
-    status: str = "PAPER SUBMITTED"
-    safety_reason: str = "APPROVED_BY_SAFETY_GATE"
 
 
 class FakeBot:
     def __init__(self):
         self.calls = []
 
-    def submit_webull_paper_order(
+    def confirm_webull_approval(
         self,
         *,
-        symbol,
         approval_id,
         approval_token,
     ):
         self.calls.append({
-            "symbol": symbol,
             "approval_id": approval_id,
             "approval_token": approval_token,
         })
 
-        return FakePaperOrder()
+        return "APPROVED"
 
 
 def printed_text(mock_print):
@@ -44,7 +29,7 @@ def printed_text(mock_print):
     )
 
 
-def test_cli_records_local_paper_order():
+def test_cli_confirms_approval_without_printing_token():
     bot = FakeBot()
 
     with (
@@ -53,8 +38,7 @@ def test_cli_records_local_paper_order():
             "argv",
             [
                 "main.py",
-                "webull-paper-submit",
-                "OPEN",
+                "webull-approval-confirm",
                 "approval-1",
             ],
         ),
@@ -76,12 +60,11 @@ def test_cli_records_local_paper_order():
 
     assert result == 0
     assert bot.calls == [{
-        "symbol": "OPEN",
         "approval_id": "approval-1",
         "approval_token": "secret-token",
     }]
-    assert "WEBULL PAPER ORDER RECORDED" in output
-    assert "LOCAL PAPER LEDGER ONLY" in output
+    assert "WEBULL APPROVAL CONFIRMED" in output
+    assert "Status: APPROVED" in output
     assert (
         "NO WEBULL BROKER ORDER WAS SUBMITTED"
         in output
@@ -89,15 +72,14 @@ def test_cli_records_local_paper_order():
     assert "secret-token" not in output
 
 
-def test_cli_requires_all_arguments():
+def test_cli_confirmation_requires_approval_id():
     with (
         patch.object(
             sys,
             "argv",
             [
                 "main.py",
-                "webull-paper-submit",
-                "OPEN",
+                "webull-approval-confirm",
             ],
         ),
         patch("builtins.print") as mock_print,
@@ -108,7 +90,7 @@ def test_cli_requires_all_arguments():
 
     assert result == 2
     assert (
-        "Usage: python main.py webull-paper-submit "
-        "SYMBOL APPROVAL_ID"
+        "Usage: python main.py "
+        "webull-approval-confirm APPROVAL_ID"
         in output
     )

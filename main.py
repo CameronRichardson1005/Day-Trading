@@ -1,3 +1,4 @@
+import getpass
 import logging
 import sys
 from datetime import date
@@ -885,21 +886,55 @@ def main() -> int:
             )
             sys.__stdout__.flush()
 
+        elif mode == "webull-approval-confirm":
+            if len(sys.argv) != 3:
+                print(
+                    "Usage: python main.py "
+                    "webull-approval-confirm APPROVAL_ID"
+                )
+                return 2
+
+            approval_token = getpass.getpass(
+                "One-time approval token: "
+            )
+
+            try:
+                status = bot.confirm_webull_approval(
+                    approval_id=sys.argv[2],
+                    approval_token=approval_token,
+                )
+            except Exception as error:
+                print(
+                    "Webull approval confirmation rejected: "
+                    f"{error}"
+                )
+                return 1
+
+            print()
+            print("WEBULL APPROVAL CONFIRMED")
+            print("--------------------------------")
+            print(f"Status: {status}")
+            print("NO WEBULL BROKER ORDER WAS SUBMITTED")
+
         elif mode == "webull-paper-submit":
-            if len(sys.argv) != 5:
+            if len(sys.argv) != 4:
                 print(
                     "Usage: python main.py "
                     "webull-paper-submit "
-                    "SYMBOL APPROVAL_ID APPROVAL_TOKEN"
+                    "SYMBOL APPROVAL_ID"
                 )
                 return 2
+
+            approval_token = getpass.getpass(
+                "One-time approval token: "
+            )
 
             try:
                 paper_order = (
                     bot.submit_webull_paper_order(
                         symbol=sys.argv[2],
                         approval_id=sys.argv[3],
-                        approval_token=sys.argv[4],
+                        approval_token=approval_token,
                     )
                 )
             except Exception as error:
@@ -949,6 +984,7 @@ def main() -> int:
                 "fibonacci-paper-status, "
                 "fibonacci-paper-publish, "
                 "backtest, webull-approval-request, "
+                "webull-approval-confirm, "
                 "webull-paper-submit, production"
             )
             return 2

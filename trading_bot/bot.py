@@ -3744,6 +3744,44 @@ class TradingBot:
             account=account,
         )
 
+    def confirm_webull_approval(
+            self,
+            *,
+            approval_id: str,
+            approval_token: str,
+    ) -> str:
+        """
+        Confirm a pending Webull preview approval.
+
+        This method only changes local approval state. It does not
+        submit, replace, modify, or cancel any broker order.
+        """
+        if self.webull_approval_queue is None:
+            raise WebullApprovalError(
+                "APPROVAL_STORE_UNAVAILABLE"
+            )
+
+        normalized_id = approval_id.strip()
+
+        if not normalized_id:
+            raise WebullApprovalError(
+                "APPROVAL_ID_REQUIRED"
+            )
+
+        if not approval_token:
+            raise WebullApprovalError(
+                "APPROVAL_TOKEN_REQUIRED"
+            )
+
+        self.webull_approval_queue.approve(
+            approval_id=normalized_id,
+            approval_token=approval_token,
+        )
+
+        return self.webull_approval_queue.status(
+            normalized_id
+        )
+
     def submit_webull_paper_order(
             self,
             *,
