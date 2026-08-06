@@ -885,6 +885,53 @@ def main() -> int:
             )
             sys.__stdout__.flush()
 
+        elif mode == "webull-paper-submit":
+            if len(sys.argv) != 5:
+                print(
+                    "Usage: python main.py "
+                    "webull-paper-submit "
+                    "SYMBOL APPROVAL_ID APPROVAL_TOKEN"
+                )
+                return 2
+
+            try:
+                paper_order = (
+                    bot.submit_webull_paper_order(
+                        symbol=sys.argv[2],
+                        approval_id=sys.argv[3],
+                        approval_token=sys.argv[4],
+                    )
+                )
+            except Exception as error:
+                print(
+                    "Webull paper submission rejected: "
+                    f"{error}"
+                )
+                return 1
+
+            print()
+            print("WEBULL PAPER ORDER RECORDED")
+            print("--------------------------------")
+            print(f"Paper order ID: {paper_order.paper_order_id}")
+            print(f"Symbol: {paper_order.symbol}")
+            print(f"Side: {paper_order.side}")
+            print(f"Quantity: {paper_order.quantity}")
+            print(
+                "Limit price: "
+                f"${paper_order.limit_price:.4f}"
+            )
+            print(
+                "Proposed exposure: "
+                f"${paper_order.proposed_exposure:.2f}"
+            )
+            print(f"Status: {paper_order.status}")
+            print(
+                "Safety result: "
+                f"{paper_order.safety_reason}"
+            )
+            print("LOCAL PAPER LEDGER ONLY")
+            print("NO WEBULL BROKER ORDER WAS SUBMITTED")
+
         elif mode == "production":
             bot.run_production()
 
@@ -901,7 +948,8 @@ def main() -> int:
                 "fibonacci-paper, "
                 "fibonacci-paper-status, "
                 "fibonacci-paper-publish, "
-                "backtest, webull-approval-request, production"
+                "backtest, webull-approval-request, "
+                "webull-paper-submit, production"
             )
             return 2
 
