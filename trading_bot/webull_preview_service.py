@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import (
@@ -15,6 +16,10 @@ from .webull_account_snapshot import (
 )
 from .webull_preview_client import (
     WebullPreviewClient,
+)
+from .webull_preview_store import (
+    WebullPreviewStore,
+    WebullPreviewStoreError,
 )
 from .webull_safety import (
     WebullAccountState,
@@ -37,9 +42,11 @@ class WebullPreviewService:
         snapshot_client: (
             WebullAccountSnapshotClient | None
         ) = None,
+        preview_store: WebullPreviewStore | None = None,
     ) -> None:
         self.client = client
         self.snapshot_client = snapshot_client
+        self.preview_store = preview_store
 
     @staticmethod
     def _failure(
@@ -90,11 +97,52 @@ class WebullPreviewService:
             2,
         )
 
+    def _persist_ready_previews(
+        self,
+        previews: list[dict[str, Any]],
+    ) -> None:
+        store = (
+            self.preview_store
+            or WebullPreviewStore()
+        )
+
+        created_at = (
+            datetime.now(UTC)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        )
+
+        records = []
+
+        for preview in previews:
+            if preview.get("status") != "PREVIEW READY":
+                continue
+
+            records.append({
+                "symbol": preview["symbol"],
+                "quantity": preview["quantity"],
+                "limitPrice": preview["limitBuy"],
+                "proposedExposure": (
+                    preview["proposedExposure"]
+                ),
+                "status": "PREVIEW READY",
+                "createdAt": created_at,
+            })
+
+        try:
+            store.save_previews(records)
+        except WebullPreviewStoreError as error:
+            print(
+                "Webull preview proposal persistence "
+                f"failed: {error}"
+            )
+
     def prepare_previews(
         self,
         stocks: dict[str, Stock],
     ) -> list[dict[str, Any]]:
         if not WEBULL_PREVIEW_ENABLED:
+            self._persist_ready_previews([])
             print(
                 "Webull preview integration is disabled."
             )
@@ -110,6 +158,7 @@ class WebullPreviewService:
             stock.webull_preview = None
 
         if not invest_stocks:
+            self._persist_ready_previews([])
             return []
 
         client = self.client or WebullPreviewClient()
@@ -124,6 +173,8 @@ class WebullPreviewService:
                 snapshot_client.get_account_state()
             )
         except Exception as error:
+            self._persist_ready_previews([])
+
             return [
                 self._failure(
                     stock,
@@ -249,5 +300,7 @@ class WebullPreviewService:
                         str(error),
                     )
                 )
+
+        self._persist_ready_previews(results)
 
         return results
