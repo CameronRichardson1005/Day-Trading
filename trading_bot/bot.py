@@ -11,6 +11,11 @@ from threading import Thread
 from zoneinfo import ZoneInfo
 
 from .webull_preview_service import WebullPreviewService
+from .webull_approval import WebullApprovalQueue
+from .webull_approval_store import (
+    WebullApprovalStore,
+    WebullApprovalStoreError,
+)
 from .alpaca_client import AlpacaClient
 from .fibonacci_research import FibonacciResearchReport
 from .fibonacci_paper import (
@@ -81,6 +86,20 @@ class TradingBot:
         self.sheets = None
         self.tracker = None
         self.dashboard = DashboardExporter()
+
+        try:
+            self.webull_approval_queue = (
+                WebullApprovalQueue(
+                    store=WebullApprovalStore(),
+                )
+            )
+        except WebullApprovalStoreError as error:
+            self.webull_approval_queue = None
+            print(
+                "Webull approval store unavailable. "
+                "Dashboard approval records will be omitted. "
+                f"Reason: {error}"
+            )
 
     def refresh_symbols_for_date(
             self,
@@ -943,6 +962,34 @@ class TradingBot:
             publish_dashboard=publish_dashboard,
         )
 
+    def _dashboard_webull_approvals(
+            self,
+    ) -> list[dict[str, object]]:
+        """
+        Return redacted approval records for dashboard display.
+
+        Approval-store failures produce an empty list and never
+        interrupt the trading session.
+        """
+        queue = getattr(
+            self,
+            "webull_approval_queue",
+            None,
+        )
+
+        if queue is None:
+            return []
+
+        try:
+            return queue.list_public_records()
+        except Exception as error:
+            print(
+                "Webull approval status unavailable. "
+                "Publishing no approval records. "
+                f"Reason: {error}"
+            )
+            return []
+
     def _publish_dashboard_session(
             self,
             date_str: str,
@@ -967,6 +1014,9 @@ class TradingBot:
                         if source == "REPLAY"
                         else "MANUAL"
                     ),
+                ),
+                webull_approvals=(
+                    self._dashboard_webull_approvals()
                 ),
             )
         except Exception as error:

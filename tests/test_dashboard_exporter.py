@@ -659,3 +659,54 @@ def test_dashboard_caps_opening_bars_processed_at_fifteen():
 
     assert symbol_payload["barsProcessed"] == 15
     assert symbol_payload["barsExpected"] == 15
+
+
+def test_payload_includes_redacted_webull_approval_status():
+    approvals = [
+        {
+            "symbol": "OPEN",
+            "quantity": 10,
+            "limitPrice": 4.25,
+            "proposedExposure": 42.50,
+            "status": "PENDING",
+            "createdAt": "2026-08-06T18:00:00Z",
+            "expiresAt": "2026-08-06T18:05:00Z",
+        }
+    ]
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-06",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 38,
+        },
+        data_feed="iex",
+        webull_approvals=approvals,
+    )
+
+    assert payload["webullApprovals"] == approvals
+    assert payload["webullSafety"] == {
+        "manualApprovalRequired": True,
+        "killSwitchActive": True,
+        "submissionEnabled": False,
+    }
+
+
+def test_payload_does_not_add_approval_fields_by_default():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-06",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "OPEN": fibonacci_stock(),
+        },
+        processed_bars={
+            "OPEN": 38,
+        },
+        data_feed="iex",
+    )
+
+    assert "webullApprovals" not in payload
+    assert "webullSafety" not in payload

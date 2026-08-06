@@ -290,14 +290,3 @@ WEBULL_APPROVAL_STORE_FILE = Path(
         ),
     )
 )
-
-WEBULL_APPROVAL_STORE_FILE = Path(
-    os.getenv(
-        "WEBULL_APPROVAL_STORE_FILE",
-        str(
-            PROJECT_ROOT
-            / "runtime"
-            / "webull_approvals.json"
-        ),
-    )
-)

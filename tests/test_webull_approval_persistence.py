@@ -165,3 +165,71 @@ def test_in_memory_queue_still_supported():
     assert queue.status(ticket.approval_id) == (
         "PENDING"
     )
+
+
+def test_public_records_are_redacted(tmp_path):
+    store = WebullApprovalStore(
+        tmp_path / "approvals.json"
+    )
+
+    queue = WebullApprovalQueue(
+        store=store
+    )
+
+    ticket = queue.create(
+        proposal=proposal(),
+        account=account(),
+    )
+
+    records = queue.list_public_records()
+
+    assert records == [
+        {
+            "symbol": "OPEN",
+            "quantity": 10,
+            "limitPrice": 4.0,
+            "proposedExposure": 40.0,
+            "status": "PENDING",
+            "createdAt": (
+                ticket.created_at
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            ),
+            "expiresAt": (
+                ticket.expires_at
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z")
+            ),
+        }
+    ]
+
+    serialized = str(records)
+
+    assert ticket.approval_token not in serialized
+    assert "token_hash" not in serialized
+    assert "proposal_fingerprint" not in serialized
+    assert "approval_id" not in serialized
+
+
+def test_public_records_update_expired_status(tmp_path):
+    store = WebullApprovalStore(
+        tmp_path / "approvals.json"
+    )
+    clock = MutableClock()
+
+    queue = WebullApprovalQueue(
+        store=store,
+        clock=clock,
+        ttl_seconds=60,
+    )
+
+    queue.create(
+        proposal=proposal(),
+        account=account(),
+    )
+
+    clock.advance(61)
+
+    records = queue.list_public_records()
+
+    assert records[0]["status"] == "EXPIRED"

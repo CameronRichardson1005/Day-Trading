@@ -392,6 +392,72 @@ class WebullApprovalQueue:
 
         return final_decision
 
+    @staticmethod
+    def _public_datetime(
+        value: datetime | None,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        return (
+            value.astimezone(UTC)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        )
+
+    def list_public_records(
+        self,
+    ) -> list[dict[str, object]]:
+        """
+        Return dashboard-safe approval summaries.
+
+        Tokens, token hashes, proposal fingerprints, account
+        identifiers, and broker credentials are never included.
+        """
+        self._expire_loaded_records()
+
+        records = sorted(
+            self._records.values(),
+            key=lambda record: record.created_at,
+            reverse=True,
+        )
+
+        result: list[dict[str, object]] = []
+
+        for record in records:
+            payload: dict[str, object] = {
+                "symbol": record.symbol,
+                "quantity": record.quantity,
+                "limitPrice": record.limit_price,
+                "proposedExposure": (
+                    record.proposed_exposure
+                ),
+                "status": record.status,
+                "createdAt": self._public_datetime(
+                    record.created_at
+                ),
+                "expiresAt": self._public_datetime(
+                    record.expires_at
+                ),
+            }
+
+            approved_at = self._public_datetime(
+                record.approved_at
+            )
+            consumed_at = self._public_datetime(
+                record.consumed_at
+            )
+
+            if approved_at is not None:
+                payload["approvedAt"] = approved_at
+
+            if consumed_at is not None:
+                payload["consumedAt"] = consumed_at
+
+            result.append(payload)
+
+        return result
+
     def status(
         self,
         approval_id: str,

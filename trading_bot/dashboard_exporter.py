@@ -498,6 +498,7 @@ class DashboardExporter:
             data_feed: str = MARKET_DATA_FEED,
             symbol_reliability: list[dict[str, Any]] | None = None,
             run_mode: str = "MANUAL",
+            webull_approvals: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         source = source.upper()
 
@@ -580,6 +581,17 @@ class DashboardExporter:
                 symbol_reliability
             )
 
+        if webull_approvals is not None:
+            payload["webullApprovals"] = [
+                dict(record)
+                for record in webull_approvals
+            ]
+            payload["webullSafety"] = {
+                "manualApprovalRequired": True,
+                "killSwitchActive": True,
+                "submissionEnabled": False,
+            }
+
         return payload
 
     def publish(
@@ -591,6 +603,7 @@ class DashboardExporter:
             data_feed: str = MARKET_DATA_FEED,
             symbol_reliability: list[dict[str, Any]] | None = None,
             run_mode: str = "MANUAL",
+            webull_approvals: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -608,6 +621,7 @@ class DashboardExporter:
             data_feed=data_feed,
             symbol_reliability=symbol_reliability,
             run_mode=run_mode,
+            webull_approvals=webull_approvals,
         )
 
         response = self.post_fn(
