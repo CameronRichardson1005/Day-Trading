@@ -227,6 +227,29 @@ class WebullApprovalQueue:
                 "APPROVAL_EXPIRED"
             )
 
+    def has_active_duplicate(
+        self,
+        proposal: WebullOrderProposal,
+    ) -> bool:
+        """
+        Return True when the same proposal already has a
+        PENDING or APPROVED ticket.
+        """
+        self._expire_loaded_records()
+
+        fingerprint = self._proposal_fingerprint(
+            proposal
+        )
+
+        return any(
+            record.status in {"PENDING", "APPROVED"}
+            and hmac.compare_digest(
+                record.proposal_fingerprint,
+                fingerprint,
+            )
+            for record in self._records.values()
+        )
+
     def create(
         self,
         *,

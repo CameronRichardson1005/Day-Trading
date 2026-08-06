@@ -4,14 +4,25 @@ import time as time_module
 
 from contextlib import redirect_stdout
 from dataclasses import asdict
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
 from threading import Thread
 from zoneinfo import ZoneInfo
 
 from .webull_preview_service import WebullPreviewService
-from .webull_approval import WebullApprovalQueue
+from .webull_preview_store import (
+    WebullPreviewStore,
+    WebullPreviewStoreError,
+)
+from .webull_account_snapshot import (
+    WebullAccountSnapshotClient,
+)
+from .webull_approval import (
+    WebullApprovalError,
+    WebullApprovalQueue,
+    WebullApprovalTicket,
+)
 from .webull_approval_store import (
     WebullApprovalStore,
     WebullApprovalStoreError,
@@ -52,6 +63,7 @@ from .config import (
 )
 from .dashboard_exporter import DashboardExporter
 from .models import Stock
+from .webull_safety import WebullOrderProposal
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
@@ -3620,6 +3632,110 @@ class TradingBot:
         )
 
         return invest_symbols
+
+    def request_webull_approval(
+            self,
+            symbol: str,
+    ) -> WebullApprovalTicket:
+        """
+        Create a durable manual-approval ticket from a recent
+        redacted preview proposal.
+
+        This method cannot submit, modify, replace, or cancel a
+        broker order.
+        """
+        normalized_symbol = symbol.strip().upper()
+
+        if not normalized_symbol:
+            raise WebullApprovalError(
+                "APPROVAL_SYMBOL_REQUIRED"
+            )
+
+        if self.webull_approval_queue is None:
+            raise WebullApprovalError(
+                "APPROVAL_STORE_UNAVAILABLE"
+            )
+
+        try:
+            preview = WebullPreviewStore().load_preview(
+                normalized_symbol
+            )
+        except WebullPreviewStoreError as error:
+            raise WebullApprovalError(
+                "PREVIEW_STORE_UNAVAILABLE"
+            ) from error
+
+        if preview is None:
+            raise WebullApprovalError(
+                "PREVIEW_NOT_FOUND"
+            )
+
+        if preview["status"] != "PREVIEW READY":
+            raise WebullApprovalError(
+                "PREVIEW_NOT_READY"
+            )
+
+        created_at = datetime.fromisoformat(
+            str(preview["createdAt"]).replace(
+                "Z",
+                "+00:00",
+            )
+        ).astimezone(UTC)
+
+        preview_age_seconds = (
+            datetime.now(UTC) - created_at
+        ).total_seconds()
+
+        if preview_age_seconds < 0:
+            raise WebullApprovalError(
+                "PREVIEW_TIMESTAMP_IN_FUTURE"
+            )
+
+        if preview_age_seconds > 300:
+            raise WebullApprovalError(
+                "PREVIEW_EXPIRED"
+            )
+
+        proposal = WebullOrderProposal(
+            symbol=normalized_symbol,
+            side="BUY",
+            quantity=int(preview["quantity"]),
+            limit_price=float(
+                preview["limitPrice"]
+            ),
+            manually_approved=False,
+        )
+
+        stored_exposure = round(
+            float(preview["proposedExposure"]),
+            2,
+        )
+
+        if (
+            proposal.proposed_exposure
+            != stored_exposure
+        ):
+            raise WebullApprovalError(
+                "PREVIEW_EXPOSURE_MISMATCH"
+            )
+
+        if (
+            self.webull_approval_queue
+            .has_active_duplicate(proposal)
+        ):
+            raise WebullApprovalError(
+                "DUPLICATE_ACTIVE_APPROVAL"
+            )
+
+        account = (
+            WebullAccountSnapshotClient()
+            .get_account_state()
+        )
+
+        return self.webull_approval_queue.create(
+            proposal=proposal,
+            account=account,
+        )
 
     def prepare_webull_previews(
             self,

@@ -848,6 +848,43 @@ def main() -> int:
                 train_fraction=train_fraction,
             )
 
+        elif mode == "webull-approval-request":
+            if len(sys.argv) != 3:
+                print(
+                    "Usage: python main.py "
+                    "webull-approval-request SYMBOL"
+                )
+                return 2
+
+            try:
+                ticket = bot.request_webull_approval(
+                    sys.argv[2]
+                )
+            except Exception as error:
+                print(
+                    "Webull approval request rejected: "
+                    f"{error}"
+                )
+                return 1
+
+            # Deliberately bypass normal logging so the one-time
+            # token is shown only in the local terminal.
+            sys.__stdout__.write(
+                "\nWEBULL PREVIEW APPROVAL CREATED\n"
+                "--------------------------------\n"
+                f"Symbol: {ticket.symbol}\n"
+                f"Quantity: {ticket.quantity}\n"
+                f"Limit price: ${ticket.limit_price:.4f}\n"
+                "Proposed exposure: "
+                f"${ticket.proposed_exposure:.2f}\n"
+                f"Expires: {ticket.expires_at.isoformat()}\n"
+                f"Approval ID: {ticket.approval_id}\n"
+                "One-time approval token:\n"
+                f"{ticket.approval_token}\n"
+                "\nNOT SUBMITTED — KILL SWITCH ACTIVE\n"
+            )
+            sys.__stdout__.flush()
+
         elif mode == "production":
             bot.run_production()
 
@@ -864,7 +901,7 @@ def main() -> int:
                 "fibonacci-paper, "
                 "fibonacci-paper-status, "
                 "fibonacci-paper-publish, "
-                "backtest, production"
+                "backtest, webull-approval-request, production"
             )
             return 2
 

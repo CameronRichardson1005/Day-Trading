@@ -331,3 +331,46 @@ def test_queue_exposes_no_broker_actions():
     assert not hasattr(queue, "replace_order")
     assert not hasattr(queue, "cancel_order")
     assert not hasattr(queue, "submit_order")
+
+
+def test_detects_active_duplicate_proposal():
+    queue = WebullApprovalQueue()
+    order = proposal()
+
+    queue.create(
+        proposal=order,
+        account=cash_account(),
+    )
+
+    assert queue.has_active_duplicate(order)
+
+
+def test_changed_proposal_is_not_duplicate():
+    queue = WebullApprovalQueue()
+
+    queue.create(
+        proposal=proposal(),
+        account=cash_account(),
+    )
+
+    changed = proposal(quantity=11)
+
+    assert not queue.has_active_duplicate(changed)
+
+
+def test_expired_proposal_is_not_active_duplicate():
+    clock = MutableClock()
+    queue = WebullApprovalQueue(
+        clock=clock,
+        ttl_seconds=60,
+    )
+    order = proposal()
+
+    queue.create(
+        proposal=order,
+        account=cash_account(),
+    )
+
+    clock.advance(61)
+
+    assert not queue.has_active_duplicate(order)
