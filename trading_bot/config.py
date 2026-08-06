@@ -34,6 +34,41 @@ if ALPACA_DATA_FEED not in {"iex", "sip"}:
 
 MARKET_DATA_FEED = ALPACA_DATA_FEED
 
+
+# Active signal strategy.
+#
+# MANIPULATION_OPENING_15M remains available for historical
+# replay, comparison, and audit purposes.
+#
+# FIBONACCI_61_8 is the intended active paper/preview strategy.
+SUPPORTED_STRATEGIES = {
+    "MANIPULATION_OPENING_15M",
+    "FIBONACCI_61_8",
+}
+
+ACTIVE_STRATEGY = os.getenv(
+    "ACTIVE_STRATEGY",
+    "MANIPULATION_OPENING_15M",
+).strip().upper()
+
+if ACTIVE_STRATEGY not in SUPPORTED_STRATEGIES:
+    raise RuntimeError(
+        "ACTIVE_STRATEGY must be one of: "
+        + ", ".join(sorted(SUPPORTED_STRATEGIES))
+    )
+
+MANIPULATION_STRATEGY_NAME = "MANIPULATION_OPENING_15M"
+FIBONACCI_STRATEGY_NAME = "FIBONACCI_61_8"
+
+# Real broker submission remains intentionally unsupported.
+REAL_ORDER_SUBMISSION_ENABLED = False
+
+# Fibonacci needs post-opening minute bars to observe the
+# impulse, retracement, bullish confirmation, and breakout.
+FIBONACCI_MONITOR_START = "09:45"
+FIBONACCI_MONITOR_CUTOFF = "11:00"
+FIBONACCI_MONITOR_INTERVAL_SECONDS = 60
+
 TICKERS = [
     "BBAI",
     "OPEN",
@@ -73,11 +108,17 @@ STOP_BUFFER = 0.05
 DASHBOARD_URL = os.getenv(
     "DASHBOARD_URL",
     (
-        "https://trading-bot-dashboard."
-        "icy-grebe-0605.chatgpt.site"
+        "https://cameron-trading-desk."
+        "cameron-richardson.workers.dev"
         "/api/sessions/latest"
     ),
 ).strip()
+
+if "chatgpt.site" in DASHBOARD_URL.lower():
+    raise RuntimeError(
+        "DASHBOARD_URL must use the Cloudflare trading desk. "
+        "ChatGPT-hosted dashboard URLs are not supported."
+    )
 
 DASHBOARD_INGEST_KEY = os.getenv(
     "DASHBOARD_INGEST_KEY",
@@ -155,7 +196,7 @@ WEBULL_PREVIEW_MAX_SHARES = int(
 WEBULL_PREVIEW_MAX_POSITION_VALUE = float(
     os.getenv(
         "WEBULL_PREVIEW_MAX_POSITION_VALUE",
-        "5000",
+        "500",
     )
 )
 
@@ -173,3 +214,79 @@ if WEBULL_PREVIEW_MAX_POSITION_VALUE <= 0:
     raise RuntimeError(
         "WEBULL_PREVIEW_MAX_POSITION_VALUE must be positive."
     )
+
+
+# Hard Webull account safety limits.
+#
+# These limits apply independently of strategy sizing. They must
+# remain enforced before any future real-order submission.
+WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS = float(
+    os.getenv(
+        "WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS",
+        "500",
+    )
+)
+
+WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS = float(
+    os.getenv(
+        "WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS",
+        "475",
+    )
+)
+
+WEBULL_REQUIRE_CASH_ACCOUNT = True
+WEBULL_ALLOW_MARGIN = False
+WEBULL_ALLOW_SHORT_SELLING = False
+WEBULL_REQUIRE_MANUAL_APPROVAL = True
+
+# Real Webull order submission remains disabled. This is a
+# hard-coded fail-safe rather than an environment-controlled flag.
+WEBULL_ORDER_SUBMISSION_ENABLED = False
+
+if WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS <= 0:
+    raise RuntimeError(
+        "WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS must be positive."
+    )
+
+if WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS <= 0:
+    raise RuntimeError(
+        "WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS must be positive."
+    )
+
+if (
+    WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS
+    > WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS
+):
+    raise RuntimeError(
+        "Webull operational exposure cap cannot exceed "
+        "the hard total-exposure cap."
+    )
+
+# Webull manual approval workflow.
+WEBULL_APPROVAL_TTL_SECONDS = int(
+    os.getenv(
+        "WEBULL_APPROVAL_TTL_SECONDS",
+        "300",
+    )
+)
+
+if WEBULL_APPROVAL_TTL_SECONDS <= 0:
+    raise RuntimeError(
+        "WEBULL_APPROVAL_TTL_SECONDS must be positive."
+    )
+
+# Hard fail-safe. The approval workflow may be tested while
+# this remains active, but no approved order can be claimed
+# for submission.
+WEBULL_TRADING_KILL_SWITCH = True
+
+WEBULL_APPROVAL_STORE_FILE = Path(
+    os.getenv(
+        "WEBULL_APPROVAL_STORE_FILE",
+        str(
+            PROJECT_ROOT
+            / "runtime"
+            / "webull_approvals.json"
+        ),
+    )
+)

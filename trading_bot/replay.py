@@ -227,6 +227,7 @@ class HistoricalReplay:
         bars_by_symbol: dict[str, list[dict]],
         slippage_bps: float = 0.0,
         commission_per_share: float = 0.0,
+        close_open_positions: bool = True,
     ) -> None:
         """
         Calculate hypothetical post-09:45 results.
@@ -352,7 +353,39 @@ class HistoricalReplay:
                     symbol,
                     [],
                 )
+
+                if not symbol_bars:
+                    stock.outcome = {
+                        "status": "STILL OPEN",
+                        "entryTime": entry_time,
+                        "entryPrice": entry_price,
+                        "detail": (
+                            "The entry was reached, but no later "
+                            "bars were available to evaluate the "
+                            "target or trading stop."
+                        ),
+                    }
+                    continue
+
                 final_bar = symbol_bars[-1]
+
+                if not close_open_positions:
+                    stock.outcome = {
+                        "status": "STILL OPEN",
+                        "entryTime": entry_time,
+                        "entryPrice": entry_price,
+                        "lastPrice": float(final_bar["c"]),
+                        "lastTime": self._outcome_time(
+                            final_bar
+                        ),
+                        "detail": (
+                            "The entry was reached, but neither "
+                            "the target nor trading stop was "
+                            "reached before the outcome cutoff."
+                        ),
+                    }
+                    continue
+
                 exit_price = float(final_bar["c"])
                 stock.outcome = self._closed_outcome(
                     status="WIN",

@@ -300,6 +300,87 @@ def find_upward_impulse(
     return None
 
 
+def find_upward_impulses(
+    bars: list[dict[str, Any]],
+    *,
+    atr: float,
+    minimum_atr_multiple: float = 1.0,
+) -> list[tuple[int, int]]:
+    """
+    Find chronological, non-overlapping upward impulses.
+
+    This is research-only. The active strategy continues to use
+    find_upward_impulse(), which selects only the first qualifying
+    impulse.
+
+    After one impulse qualifies, the next search begins after that
+    impulse's high bar. This avoids overlapping duplicate candidates
+    while preserving chronological ordering and preventing look-ahead
+    selection.
+    """
+    if atr <= 0 or minimum_atr_multiple <= 0:
+        return []
+
+    candidates = [
+        (index, bar)
+        for index, bar in enumerate(bars)
+        if (
+            _timestamp(bar).hour < 10
+            or (
+                _timestamp(bar).hour == 10
+                and _timestamp(bar).minute <= 30
+            )
+        )
+    ]
+
+    if len(candidates) < 2:
+        return []
+
+    required_move = atr * minimum_atr_multiple
+    impulses: list[tuple[int, int]] = []
+    search_position = 0
+
+    while search_position < len(candidates) - 1:
+        running_low_index = candidates[search_position][0]
+        running_low = float(
+            candidates[search_position][1]["l"]
+        )
+        found_position = None
+
+        for candidate_position in range(
+            search_position + 1,
+            len(candidates),
+        ):
+            index, bar = candidates[candidate_position]
+            low = float(bar["l"])
+            high = float(bar["h"])
+
+            if low < running_low:
+                running_low = low
+                running_low_index = index
+
+            move = high - running_low
+
+            if (
+                index > running_low_index
+                and move >= required_move
+            ):
+                impulses.append(
+                    (running_low_index, index)
+                )
+                found_position = candidate_position
+                break
+
+        if found_position is None:
+            break
+
+        # Begin the next independent search after the high bar
+        # of the impulse that was just selected.
+        search_position = found_position + 1
+
+    return impulses
+
+
 def _simulate_confirmed_trade(
     *,
     bars: list[dict[str, Any]],
@@ -429,6 +510,53 @@ def _simulate_confirmed_trade(
     return result
 
 
+def stopped_out_then_target(
+    *,
+    bars: list[dict[str, Any]],
+    entry_price: float,
+    stop_price: float,
+    target_price: float,
+) -> bool:
+    """
+    Return True when an entered trade reaches its stop first and
+    later reaches the target during the remaining available bars.
+
+    This is a research diagnostic only. It does not alter the
+    conservative stop-first trade outcome.
+    """
+    entered = False
+    stopped = False
+
+    for bar in bars:
+        high = float(bar["h"])
+        low = float(bar["l"])
+
+        if not entered:
+            if high < entry_price:
+                continue
+
+            entered = True
+
+        if not stopped:
+            stop_hit = low <= stop_price
+            target_hit = high >= target_price
+
+            if stop_hit:
+                stopped = True
+
+                # Same-minute stop and target remains conservative.
+                # A later bar must reach the target for this diagnostic.
+                continue
+
+            if target_hit:
+                return False
+
+        elif high >= target_price:
+            return True
+
+    return False
+
+
 def _closed_result(
     *,
     outcome: str,
@@ -510,14 +638,27 @@ def analyse_retracement_level(
     level_name: str,
     ratio: float,
     minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
     zone_tolerance_ratio: float = 0.02,
     minimum_reward_risk: float = 1.5,
     maximum_confirmation_minutes: int = 15,
     tick_size: float = 0.01,
+    stop_buffer_atr: float | None = None,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
+    impulse_indices: tuple[int, int] | None = None,
 ) -> RetracementSetup:
     bars = sorted(bars, key=lambda bar: str(bar["t"]))
+
+    if minimum_impulse_duration_minutes < 0:
+        raise ValueError(
+            "Minimum impulse duration cannot be negative."
+        )
+
+    if stop_buffer_atr is not None and stop_buffer_atr < 0:
+        raise ValueError(
+            "ATR stop buffer cannot be negative."
+        )
 
     if atr is None or atr <= 0:
         return _empty_setup(
@@ -530,10 +671,14 @@ def analyse_retracement_level(
             reason="ATR_UNAVAILABLE",
         )
 
-    impulse = find_upward_impulse(
-        bars,
-        atr=atr,
-        minimum_atr_multiple=minimum_impulse_atr,
+    impulse = (
+        impulse_indices
+        if impulse_indices is not None
+        else find_upward_impulse(
+            bars,
+            atr=atr,
+            minimum_atr_multiple=minimum_impulse_atr,
+        )
     )
 
     if impulse is None:
@@ -548,12 +693,49 @@ def analyse_retracement_level(
         )
 
     low_index, high_index = impulse
+
+    if (
+        low_index < 0
+        or high_index >= len(bars)
+        or high_index <= low_index
+    ):
+        return _empty_setup(
+            date_str=date_str,
+            symbol=symbol,
+            data_feed=data_feed,
+            level_name=level_name,
+            ratio=ratio,
+            atr=atr,
+            reason="INVALID_IMPULSE_INDICES",
+        )
+
     impulse_low_bar = bars[low_index]
     impulse_high_bar = bars[high_index]
 
     impulse_low = float(impulse_low_bar["l"])
     impulse_high = float(impulse_high_bar["h"])
     impulse_size = impulse_high - impulse_low
+    impulse_duration_minutes = _minutes_between(
+        impulse_low_bar,
+        impulse_high_bar,
+    )
+
+    if (
+        impulse_duration_minutes
+        < minimum_impulse_duration_minutes
+    ):
+        return _empty_setup(
+            date_str=date_str,
+            symbol=symbol,
+            data_feed=data_feed,
+            level_name=level_name,
+            ratio=ratio,
+            atr=atr,
+            reason=(
+                "IMPULSE_DURATION_BELOW_"
+                f"{minimum_impulse_duration_minutes}_MINUTES"
+            ),
+        )
 
     retracement_price = (
         impulse_high - impulse_size * ratio
@@ -637,7 +819,17 @@ def analyse_retracement_level(
     entry_price = (
         float(confirmation_bar["h"]) + tick_size
     )
-    stop_price = pullback_low - tick_size
+
+    stop_buffer = (
+        tick_size
+        if stop_buffer_atr is None
+        else max(
+            tick_size,
+            atr * stop_buffer_atr,
+        )
+    )
+
+    stop_price = pullback_low - stop_buffer
     target_price = impulse_high
 
     risk = entry_price - stop_price
@@ -754,9 +946,8 @@ def analyse_retracement_level(
         impulse_atr_multiple=(
             impulse_size / atr
         ),
-        impulse_duration_minutes=_minutes_between(
-            impulse_low_bar,
-            impulse_high_bar,
+        impulse_duration_minutes=(
+            impulse_duration_minutes
         ),
         impulse_average_volume=impulse_volume,
         retracement_price=retracement_price,
@@ -824,6 +1015,8 @@ def analyse_symbol_day(
     bars: list[dict[str, Any]],
     atr: float | None,
     minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
+    stop_buffer_atr: float | None = None,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
 ) -> list[RetracementSetup]:
@@ -837,6 +1030,10 @@ def analyse_symbol_day(
             level_name=level_name,
             ratio=ratio,
             minimum_impulse_atr=minimum_impulse_atr,
+            minimum_impulse_duration_minutes=(
+                minimum_impulse_duration_minutes
+            ),
+            stop_buffer_atr=stop_buffer_atr,
             slippage_bps=slippage_bps,
             commission_per_share=commission_per_share,
         )
@@ -844,6 +1041,101 @@ def analyse_symbol_day(
             FIBONACCI_LEVELS.items()
         )
     ]
+
+
+def analyse_symbol_day_multiple_impulses(
+    *,
+    date_str: str,
+    symbol: str,
+    data_feed: str,
+    bars: list[dict[str, Any]],
+    atr: float | None,
+    minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
+    stop_buffer_atr: float | None = None,
+    slippage_bps: float = 0.0,
+    commission_per_share: float = 0.0,
+) -> list[RetracementSetup]:
+    """
+    Evaluate each chronological non-overlapping impulse for every
+    Fibonacci level.
+
+    This function is research-only and is not used by the active
+    live strategy, Google Sheets, dashboard publishing, Webull
+    previews, or order generation.
+    """
+    sorted_bars = sorted(
+        bars,
+        key=lambda bar: str(bar["t"]),
+    )
+
+    if atr is None or atr <= 0:
+        return [
+            _empty_setup(
+                date_str=date_str,
+                symbol=symbol,
+                data_feed=data_feed,
+                level_name=level_name,
+                ratio=ratio,
+                atr=atr,
+                reason="ATR_UNAVAILABLE",
+            )
+            for level_name, ratio
+            in FIBONACCI_LEVELS.items()
+        ]
+
+    impulses = find_upward_impulses(
+        sorted_bars,
+        atr=atr,
+        minimum_atr_multiple=minimum_impulse_atr,
+    )
+
+    if not impulses:
+        return [
+            _empty_setup(
+                date_str=date_str,
+                symbol=symbol,
+                data_feed=data_feed,
+                level_name=level_name,
+                ratio=ratio,
+                atr=atr,
+                reason="NO_QUALIFYING_UPWARD_IMPULSE",
+            )
+            for level_name, ratio
+            in FIBONACCI_LEVELS.items()
+        ]
+
+    records: list[RetracementSetup] = []
+
+    for impulse_indices in impulses:
+        for level_name, ratio in (
+            FIBONACCI_LEVELS.items()
+        ):
+            records.append(
+                analyse_retracement_level(
+                    date_str=date_str,
+                    symbol=symbol,
+                    data_feed=data_feed,
+                    bars=sorted_bars,
+                    atr=atr,
+                    level_name=level_name,
+                    ratio=ratio,
+                    minimum_impulse_atr=(
+                        minimum_impulse_atr
+                    ),
+                    minimum_impulse_duration_minutes=(
+                        minimum_impulse_duration_minutes
+                    ),
+                    stop_buffer_atr=stop_buffer_atr,
+                    slippage_bps=slippage_bps,
+                    commission_per_share=(
+                        commission_per_share
+                    ),
+                    impulse_indices=impulse_indices,
+                )
+            )
+
+    return records
 
 
 def metrics_for(

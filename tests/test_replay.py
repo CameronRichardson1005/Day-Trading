@@ -558,3 +558,62 @@ def test_atr_fetch_follows_pagination_and_records_diagnostics():
         ["valid_daily_bars"]
         == 15
     )
+
+
+def test_replay_keeps_unresolved_entry_still_open():
+    stock = outcome_stock("OPEN")
+
+    replay = HistoricalReplay(
+        stocks={"OPEN": stock},
+        strategy=RecordingStrategy(),
+        speed=0,
+    )
+
+    replay.calculate_outcomes(
+        {
+            "OPEN": [
+                outcome_bar(
+                    "2026-07-23T13:45:00Z",
+                    10.1,
+                    10.5,
+                    9.9,
+                    10.3,
+                ),
+            ],
+        },
+        close_open_positions=False,
+    )
+
+    assert stock.outcome["status"] == "STILL OPEN"
+    assert stock.outcome["entryTime"] == "09:45"
+    assert stock.outcome["entryPrice"] == 10.0
+    assert stock.outcome["lastPrice"] == 10.3
+    assert stock.outcome["lastTime"] == "09:45"
+    assert "outcome cutoff" in stock.outcome["detail"]
+
+
+def test_replay_no_entry_remains_no_entry_in_open_mode():
+    stock = outcome_stock("NONE")
+
+    replay = HistoricalReplay(
+        stocks={"NONE": stock},
+        strategy=RecordingStrategy(),
+        speed=0,
+    )
+
+    replay.calculate_outcomes(
+        {
+            "NONE": [
+                outcome_bar(
+                    "2026-07-23T13:45:00Z",
+                    10.7,
+                    10.9,
+                    10.5,
+                    10.8,
+                ),
+            ],
+        },
+        close_open_positions=False,
+    )
+
+    assert stock.outcome["status"] == "NO ENTRY"

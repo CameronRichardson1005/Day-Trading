@@ -2,10 +2,19 @@ from types import SimpleNamespace
 
 import pytest
 
+import trading_bot.bot as bot_module
 from trading_bot.bot import TradingBot
 
 
-def test_ticker_failure_does_not_stop_remaining_tickers():
+def test_ticker_failure_does_not_stop_remaining_tickers(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
     events = []
     bot = object.__new__(TradingBot)
 
@@ -98,8 +107,9 @@ def test_orders_write_is_attempted_when_invest_write_fails():
             self,
             date_str,
             stocks,
+                sheet_name="Invest",
         ):
-            events.append("Invest attempted")
+            events.append(f"{sheet_name} attempted")
             raise RuntimeError(
                 "CONTROLLED INVEST FAILURE"
             )
@@ -108,8 +118,9 @@ def test_orders_write_is_attempted_when_invest_write_fails():
             self,
             date_str,
             stocks,
+                sheet_name="Orders",
         ):
-            events.append("Orders attempted")
+            events.append(f"{sheet_name} attempted")
 
     bot.sheets = FakeSheets()
 
@@ -124,6 +135,6 @@ def test_orders_write_is_attempted_when_invest_write_fails():
     assert events == [
         "strategy calculated",
         "sheets initialised",
-        "Invest attempted",
-        "Orders attempted",
+        "Fibonacci Invest attempted",
+        "Fibonacci Orders attempted",
     ]

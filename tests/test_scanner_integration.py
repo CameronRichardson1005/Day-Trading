@@ -118,6 +118,12 @@ def test_candidate_configuration_is_distinct():
 def test_live_scanner_and_dashboard_run_before_tracking(
         monkeypatch,
 ):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
     bot = object.__new__(TradingBot)
     bot.scanner = object()
     events = []
@@ -211,6 +217,12 @@ def test_live_scanner_and_dashboard_run_before_tracking(
 def test_dashboard_failure_does_not_stop_tracking(
         monkeypatch,
 ):
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "MANIPULATION_OPENING_15M",
+    )
+
     bot = object.__new__(TradingBot)
     bot.scanner = object()
     events = []

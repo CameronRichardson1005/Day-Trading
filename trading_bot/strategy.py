@@ -4,7 +4,11 @@ from .models import Stock
 
 class ManipulationStrategy:
     """
-    Implements the current opening 15-minute strategy.
+    Preserved opening 15-minute manipulation strategy.
+
+    This implementation remains in the repository for historical
+    replay, backtesting, comparison, and audit purposes. It may be
+    retired from active INVEST routing without being deleted.
 
     INVEST requires:
     1. Manipulation candle

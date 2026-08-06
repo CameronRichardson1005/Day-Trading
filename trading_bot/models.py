@@ -35,6 +35,19 @@ class Stock:
     # Strategy results
     signal: str = "NO INVEST"
 
+    # Identifies the strategy that produced the active signal.
+    # Historical strategies remain preserved independently.
+    strategy_name: str = ""
+    strategy_status: str = ""
+    strategy_detail: str = ""
+    strategy_rejection_reason: str = ""
+
+    reward_risk: float | None = None
+    confirmation_time: str = ""
+    retracement_price: float | None = None
+    impulse_atr_multiple: float | None = None
+    pullback_volume_ratio: float | None = None
+
     limit_buy: float | None = None
     limit_sell: float | None = None
 

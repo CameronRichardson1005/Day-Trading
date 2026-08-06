@@ -1358,33 +1358,80 @@ class SheetsClient:
             "reconciled in the Minute Bars History sheet."
         )
 
+    @staticmethod
+    def _optional_round(
+            value,
+            digits: int = 4,
+    ):
+        """
+        Round numeric strategy values while preserving missing data.
+        """
+        if isinstance(value, (int, float)):
+            return round(float(value), digits)
+
+        return ""
+
+    @staticmethod
+    def _opening_value(
+            opening_bar,
+            key: str,
+    ):
+        """
+        Safely return one opening-candle value.
+        """
+        if not isinstance(opening_bar, dict):
+            return ""
+
+        value = opening_bar.get(key)
+
+        if isinstance(value, (int, float)):
+            return value
+
+        return ""
+
     def write_strategy_results(
             self,
             date_str: str,
             stocks: dict,
+            sheet_name: str = "Invest",
     ) -> None:
+        """
+        Reconcile strategy-neutral active results in the Invest sheet.
+
+        Both the preserved manipulation strategy and the active
+        Fibonacci strategy use this schema.
+        """
         invest_columns = [
             "Date",
             "Symbol",
-            "Open",
-            "High",
-            "Low",
-            "Close",
-            "Prev Day Range (ATR)",
-            "ATR x 0.25",
-            "Candle Range",
-            "Manipulation Candle",
-            "Red Candle",
+            "Strategy",
+            "Strategy Status",
             "Signal",
-            "Limit Buy",
-            "Limit Sell",
+            "Entry",
+            "Target",
             "Stop Loss",
             "Trading Stop Loss",
+            "Reward / Risk",
+            "Confirmation Time",
+            "Retracement Price",
+            "Impulse ATR Multiple",
+            "Pullback Volume Ratio",
+            "Rejection Reason",
+            "Strategy Detail",
+            "Prev Day Range (ATR)",
+            "Opening Open",
+            "Opening High",
+            "Opening Low",
+            "Opening Close",
+            "Candle Range",
+            "ATR Threshold",
+            "Manipulation Candle",
+            "Red Candle",
             "Proximity to High/Low",
         ]
 
         worksheet = self.get_or_create_worksheet(
-            title="Invest",
+            title=sheet_name,
             rows=100,
             cols=len(invest_columns),
         )
@@ -1392,50 +1439,78 @@ class SheetsClient:
         strategy_rows = []
 
         for stock in stocks.values():
-            if stock.opening_bar is None or stock.atr is None:
-                strategy_rows.append(
-                    [
-                        date_str,
-                        stock.symbol,
-                        "No data",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "NO INVEST",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                    ]
-                )
-                continue
-
             opening_bar = stock.opening_bar
 
             strategy_rows.append(
                 [
                     date_str,
                     stock.symbol,
-                    opening_bar["o"],
-                    opening_bar["h"],
-                    opening_bar["l"],
-                    opening_bar["c"],
-                    round(stock.atr, 4),
-                    round(stock.atr_threshold, 4),
-                    round(stock.candle_range, 4),
-                    "YES" if stock.is_manipulation else "NO",
-                    "YES" if stock.is_red else "NO",
+                    stock.strategy_name,
+                    stock.strategy_status,
                     stock.signal,
-                    round(stock.limit_buy, 4),
-                    round(stock.limit_sell, 4),
-                    round(stock.stop_loss, 4),
-                    round(stock.trading_stop_loss, 4),
+                    self._optional_round(
+                        stock.limit_buy
+                    ),
+                    self._optional_round(
+                        stock.limit_sell
+                    ),
+                    self._optional_round(
+                        stock.stop_loss
+                    ),
+                    self._optional_round(
+                        stock.trading_stop_loss
+                    ),
+                    self._optional_round(
+                        stock.reward_risk,
+                        digits=2,
+                    ),
+                    stock.confirmation_time,
+                    self._optional_round(
+                        stock.retracement_price
+                    ),
+                    self._optional_round(
+                        stock.impulse_atr_multiple,
+                        digits=3,
+                    ),
+                    self._optional_round(
+                        stock.pullback_volume_ratio,
+                        digits=3,
+                    ),
+                    stock.strategy_rejection_reason,
+                    stock.strategy_detail,
+                    self._optional_round(stock.atr),
+                    self._opening_value(
+                        opening_bar,
+                        "o",
+                    ),
+                    self._opening_value(
+                        opening_bar,
+                        "h",
+                    ),
+                    self._opening_value(
+                        opening_bar,
+                        "l",
+                    ),
+                    self._opening_value(
+                        opening_bar,
+                        "c",
+                    ),
+                    self._optional_round(
+                        stock.candle_range
+                    ),
+                    self._optional_round(
+                        stock.atr_threshold
+                    ),
+                    (
+                        "YES"
+                        if stock.is_manipulation
+                        else "NO"
+                    ),
+                    (
+                        "YES"
+                        if stock.is_red
+                        else "NO"
+                    ),
                     stock.proximity,
                 ]
             )
@@ -1445,19 +1520,20 @@ class SheetsClient:
             columns=invest_columns,
             date_str=date_str,
             replacement_rows=strategy_rows,
-            last_column="Q",
-            sheet_name="Invest",
+            last_column="Z",
+            sheet_name=sheet_name,
         )
 
         print(
             f"{len(strategy_rows)} strategy row(s) reconciled "
-            "in the Invest sheet."
+            f"in the {sheet_name} sheet."
         )
 
     def write_orders(
             self,
             date_str: str,
             stocks: dict,
+            sheet_name: str = "Orders",
     ) -> None:
         order_columns = [
             "Date",
@@ -1476,7 +1552,7 @@ class SheetsClient:
         ]
 
         worksheet = self.get_or_create_worksheet(
-            title="Orders",
+            title=sheet_name,
             rows=100,
             cols=len(order_columns),
         )
@@ -1554,13 +1630,13 @@ class SheetsClient:
             date_str=date_str,
             replacement_rows=order_rows,
             last_column="M",
-            sheet_name="Orders",
+            sheet_name=sheet_name,
         )
 
         if order_rows:
             print(
                 f"{len(order_rows)} order(s) reconciled "
-                "in the Orders sheet."
+                f"in the {sheet_name} sheet."
             )
         else:
             print(
