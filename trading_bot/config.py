@@ -196,7 +196,7 @@ WEBULL_PREVIEW_MAX_SHARES = int(
 WEBULL_PREVIEW_MAX_POSITION_VALUE = float(
     os.getenv(
         "WEBULL_PREVIEW_MAX_POSITION_VALUE",
-        "5000",
+        "500",
     )
 )
 
@@ -213,4 +213,51 @@ if WEBULL_PREVIEW_MAX_SHARES <= 0:
 if WEBULL_PREVIEW_MAX_POSITION_VALUE <= 0:
     raise RuntimeError(
         "WEBULL_PREVIEW_MAX_POSITION_VALUE must be positive."
+    )
+
+
+# Hard Webull account safety limits.
+#
+# These limits apply independently of strategy sizing. They must
+# remain enforced before any future real-order submission.
+WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS = float(
+    os.getenv(
+        "WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS",
+        "500",
+    )
+)
+
+WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS = float(
+    os.getenv(
+        "WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS",
+        "475",
+    )
+)
+
+WEBULL_REQUIRE_CASH_ACCOUNT = True
+WEBULL_ALLOW_MARGIN = False
+WEBULL_ALLOW_SHORT_SELLING = False
+WEBULL_REQUIRE_MANUAL_APPROVAL = True
+
+# Real Webull order submission remains disabled. This is a
+# hard-coded fail-safe rather than an environment-controlled flag.
+WEBULL_ORDER_SUBMISSION_ENABLED = False
+
+if WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS <= 0:
+    raise RuntimeError(
+        "WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS must be positive."
+    )
+
+if WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS <= 0:
+    raise RuntimeError(
+        "WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS must be positive."
+    )
+
+if (
+    WEBULL_OPERATIONAL_EXPOSURE_CAP_DOLLARS
+    > WEBULL_MAX_TOTAL_EXPOSURE_DOLLARS
+):
+    raise RuntimeError(
+        "Webull operational exposure cap cannot exceed "
+        "the hard total-exposure cap."
     )
