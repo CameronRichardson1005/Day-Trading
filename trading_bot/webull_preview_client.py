@@ -116,6 +116,8 @@ class WebullPreviewClient:
     @staticmethod
     def build_request(
             stock: Stock,
+            *,
+            max_position_value: float | None = None,
     ) -> WebullPreviewRequest:
         if stock.signal != "INVEST":
             raise ValueError(
@@ -152,13 +154,28 @@ class WebullPreviewClient:
                 f"{stock.symbol} has invalid risk per share."
             )
 
+        effective_max_position_value = (
+            WEBULL_PREVIEW_MAX_POSITION_VALUE
+            if max_position_value is None
+            else min(
+                WEBULL_PREVIEW_MAX_POSITION_VALUE,
+                float(max_position_value),
+            )
+        )
+
+        if effective_max_position_value <= 0:
+            raise ValueError(
+                f"{stock.symbol} has no remaining "
+                "account exposure allowance."
+            )
+
         risk_based_quantity = math.floor(
             WEBULL_PREVIEW_RISK_DOLLARS
             / risk_per_share
         )
 
         position_value_quantity = math.floor(
-            WEBULL_PREVIEW_MAX_POSITION_VALUE
+            effective_max_position_value
             / limit_price
         )
 
@@ -182,6 +199,17 @@ class WebullPreviewClient:
 
         if quantity < 1:
             if position_value_quantity < 1:
+                if (
+                    max_position_value is not None
+                    and effective_max_position_value
+                    < WEBULL_PREVIEW_MAX_POSITION_VALUE
+                ):
+                    raise ValueError(
+                        f"{stock.symbol} has insufficient "
+                        "remaining account exposure allowance "
+                        "for one share."
+                    )
+
                 raise ValueError(
                     f"{stock.symbol} limit-buy price exceeds "
                     "the maximum position value."
@@ -214,7 +242,7 @@ class WebullPreviewClient:
                 2,
             ),
             max_position_value=round(
-                WEBULL_PREVIEW_MAX_POSITION_VALUE,
+                effective_max_position_value,
                 2,
             ),
             sizing_constraint=sizing_constraint,
