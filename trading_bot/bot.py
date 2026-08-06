@@ -3,6 +3,7 @@ import os
 import time as time_module
 
 from contextlib import redirect_stdout
+from dataclasses import asdict
 from datetime import datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
@@ -19,8 +20,11 @@ from .fibonacci_paper import (
 from .fibonacci_retracement import (
     FIBONACCI_LEVELS,
     FibonacciRetracementReport,
+    analyse_retracement_level,
     analyse_symbol_day,
     analyse_symbol_day_multiple_impulses,
+    metrics_for,
+    stopped_out_then_target,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
 
@@ -2086,6 +2090,599 @@ class TradingBot:
         print(f"Failed sessions: {failures_path}")
 
         return report
+
+    def run_fibonacci_entry_stop_comparison(
+        self,
+        start_date: str,
+        end_date: str,
+        output_directory: str | Path = (
+            "reports/fibonacci-entry-stop-comparison"
+        ),
+        data_feed: str = MARKET_DATA_FEED,
+        slippage_bps: float = 15.0,
+        commission_per_share: float = 0.0,
+        risk_dollars: float = 25.0,
+        maximum_shares: int = 1000,
+        maximum_position_value: float = 5000.0,
+    ) -> tuple[Path, Path, Path]:
+        """
+        Compare four Fibonacci entry filters against four stop
+        buffers using the current first-impulse research method.
+
+        This workflow is strictly read-only. It cannot write Google
+        Sheets, publish the dashboard, call Webull, create previews,
+        or submit orders.
+        """
+        data_feed = data_feed.strip().lower()
+
+        if data_feed not in {"iex", "sip"}:
+            raise ValueError(
+                "Market-data feed must be 'iex' or 'sip'."
+            )
+
+        if slippage_bps < 0:
+            raise ValueError(
+                "Slippage cannot be negative."
+            )
+
+        if commission_per_share < 0:
+            raise ValueError(
+                "Commission cannot be negative."
+            )
+
+        if risk_dollars <= 0:
+            raise ValueError(
+                "Risk dollars must be positive."
+            )
+
+        if maximum_shares <= 0:
+            raise ValueError(
+                "Maximum shares must be positive."
+            )
+
+        if maximum_position_value <= 0:
+            raise ValueError(
+                "Maximum position value must be positive."
+            )
+
+        try:
+            start = datetime.strptime(
+                start_date,
+                "%Y-%m-%d",
+            ).date()
+            end = datetime.strptime(
+                end_date,
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                "Comparison dates must use YYYY-MM-DD."
+            ) from error
+
+        dates = weekday_dates(start, end)
+
+        if not dates:
+            raise ValueError(
+                "Comparison range contains no weekdays."
+            )
+
+        output_directory = Path(output_directory)
+        output_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        entry_variants = [
+            {
+                "entry_variant": "CONTROL",
+                "minimum_impulse_atr": 0.50,
+                "minimum_duration_minutes": 15,
+            },
+            {
+                "entry_variant": "DURATION_10",
+                "minimum_impulse_atr": 0.50,
+                "minimum_duration_minutes": 10,
+            },
+            {
+                "entry_variant": "IMPULSE_045",
+                "minimum_impulse_atr": 0.45,
+                "minimum_duration_minutes": 15,
+            },
+            {
+                "entry_variant": "COMBINED",
+                "minimum_impulse_atr": 0.45,
+                "minimum_duration_minutes": 10,
+            },
+        ]
+
+        stop_variants = [
+            {
+                "stop_variant": "FIXED_001",
+                "stop_buffer_atr": None,
+            },
+            {
+                "stop_variant": "ATR_005",
+                "stop_buffer_atr": 0.05,
+            },
+            {
+                "stop_variant": "ATR_010",
+                "stop_buffer_atr": 0.10,
+            },
+            {
+                "stop_variant": "ATR_015",
+                "stop_buffer_atr": 0.15,
+            },
+        ]
+
+        variants = [
+            {
+                **entry_variant,
+                **stop_variant,
+                "variant": (
+                    f"{entry_variant['entry_variant']}__"
+                    f"{stop_variant['stop_variant']}"
+                ),
+            }
+            for entry_variant in entry_variants
+            for stop_variant in stop_variants
+        ]
+
+        records_by_variant = {
+            variant["variant"]: []
+            for variant in variants
+        }
+
+        detail_rows = []
+        failure_rows = []
+
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        print()
+        print("===================================")
+        print(" Fibonacci Entry/Stop Comparison")
+        print("===================================")
+        print(
+            f"Date range: {start_date} to {end_date}"
+        )
+        print(f"Market-data feed: {data_feed.upper()}")
+        print(
+            f"Modeled slippage: {slippage_bps:.1f} bps"
+        )
+        print(
+            f"Risk per trade: ${risk_dollars:.2f}"
+        )
+        print(f"Variants: {len(variants)}")
+        print("Fibonacci level: FIB_61_8")
+        print(
+            "READ-ONLY MODE: Google Sheets, dashboard, Webull, "
+            "previews, and orders are disabled."
+        )
+
+        for trading_date in dates:
+            date_str = trading_date.isoformat()
+
+            try:
+                with redirect_stdout(StringIO()):
+                    self.refresh_symbols_for_date(
+                        date_str,
+                        data_feed=data_feed,
+                    )
+
+                symbols_csv = self.symbols_csv
+
+                session_start = datetime.combine(
+                    trading_date,
+                    time(hour=9, minute=30),
+                    tzinfo=eastern,
+                ).astimezone(utc)
+
+                session_end = datetime.combine(
+                    trading_date,
+                    time(hour=16),
+                    tzinfo=eastern,
+                ).astimezone(utc)
+
+                bars_by_symbol = (
+                    self.alpaca.get_historical_1min_bars(
+                        symbols_csv=symbols_csv,
+                        start_iso=session_start.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        ),
+                        end_iso=session_end.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        ),
+                        feed=data_feed,
+                    )
+                )
+
+                atrs = (
+                    self.alpaca
+                    .get_previous_day_ranges_all(
+                        symbols_csv=symbols_csv,
+                        date_str=date_str,
+                        feed=data_feed,
+                    )
+                )
+
+                date_qualifying = 0
+
+                for symbol in self.stocks:
+                    bars = sorted(
+                        bars_by_symbol.get(symbol, []),
+                        key=lambda bar: str(bar["t"]),
+                    )
+                    atr = atrs.get(symbol)
+
+                    for variant in variants:
+                        setup = analyse_retracement_level(
+                            date_str=date_str,
+                            symbol=symbol,
+                            data_feed=data_feed,
+                            bars=bars,
+                            atr=atr,
+                            level_name="FIB_61_8",
+                            ratio=FIBONACCI_LEVELS[
+                                "FIB_61_8"
+                            ],
+                            minimum_impulse_atr=(
+                                variant[
+                                    "minimum_impulse_atr"
+                                ]
+                            ),
+                            minimum_impulse_duration_minutes=(
+                                variant[
+                                    "minimum_duration_minutes"
+                                ]
+                            ),
+                            minimum_reward_risk=1.5,
+                            stop_buffer_atr=(
+                                variant["stop_buffer_atr"]
+                            ),
+                            slippage_bps=slippage_bps,
+                            commission_per_share=(
+                                commission_per_share
+                            ),
+                        )
+
+                        volume_valid = (
+                            setup.pullback_volume_ratio
+                            is not None
+                            and setup.pullback_volume_ratio < 1.0
+                        )
+
+                        eligible = (
+                            setup.setup_found
+                            and volume_valid
+                        )
+
+                        if not setup.setup_found:
+                            eligibility_reason = (
+                                setup.rejection_reason
+                                or "SETUP_NOT_FOUND"
+                            )
+                        elif not volume_valid:
+                            eligibility_reason = (
+                                "PULLBACK_VOLUME_NOT_LOWER"
+                            )
+                        else:
+                            eligibility_reason = ""
+
+                        stopped_then_target = False
+                        risk_per_share = None
+                        position_shares = None
+
+                        if (
+                            eligible
+                            and setup.entry_price is not None
+                            and setup.stop_price is not None
+                            and setup.target_price is not None
+                        ):
+                            risk_per_share = (
+                                float(setup.entry_price)
+                                - float(setup.stop_price)
+                            )
+
+                            if risk_per_share > 0:
+                                risk_sized_shares = int(
+                                    risk_dollars
+                                    / risk_per_share
+                                )
+                                value_sized_shares = int(
+                                    maximum_position_value
+                                    / float(setup.entry_price)
+                                )
+
+                                position_shares = max(
+                                    0,
+                                    min(
+                                        risk_sized_shares,
+                                        value_sized_shares,
+                                        maximum_shares,
+                                    ),
+                                )
+
+                            if (
+                                setup.outcome == "LOSS"
+                                and setup.exit_reason == "STOP"
+                            ):
+                                confirmation_index = None
+
+                                for index, bar in enumerate(bars):
+                                    bar_time = (
+                                        datetime.fromisoformat(
+                                            str(bar["t"]).replace(
+                                                "Z",
+                                                "+00:00",
+                                            )
+                                        )
+                                        .astimezone(eastern)
+                                        .strftime("%H:%M")
+                                    )
+
+                                    if (
+                                        bar_time
+                                        == setup.confirmation_time
+                                    ):
+                                        confirmation_index = index
+                                        break
+
+                                if confirmation_index is not None:
+                                    stopped_then_target = (
+                                        stopped_out_then_target(
+                                            bars=bars[
+                                                confirmation_index + 1:
+                                            ],
+                                            entry_price=float(
+                                                setup.entry_price
+                                            ),
+                                            stop_price=float(
+                                                setup.stop_price
+                                            ),
+                                            target_price=float(
+                                                setup.target_price
+                                            ),
+                                        )
+                                    )
+
+                        row = {
+                            "variant": variant["variant"],
+                            "entry_variant": (
+                                variant["entry_variant"]
+                            ),
+                            "stop_variant": (
+                                variant["stop_variant"]
+                            ),
+                            "minimum_impulse_atr": (
+                                variant[
+                                    "minimum_impulse_atr"
+                                ]
+                            ),
+                            "minimum_duration_minutes": (
+                                variant[
+                                    "minimum_duration_minutes"
+                                ]
+                            ),
+                            "stop_buffer_atr": (
+                                variant["stop_buffer_atr"]
+                            ),
+                            "eligible": eligible,
+                            "eligibility_reason": (
+                                eligibility_reason
+                            ),
+                            "stopped_out_then_target": (
+                                stopped_then_target
+                            ),
+                            "risk_per_share": risk_per_share,
+                            "position_shares": position_shares,
+                            **asdict(setup),
+                        }
+
+                        detail_rows.append(row)
+
+                        if eligible:
+                            records_by_variant[
+                                variant["variant"]
+                            ].append(setup)
+                            date_qualifying += 1
+
+                print(
+                    f"{date_str}: "
+                    f"{len(self.stocks)} symbols, "
+                    f"{date_qualifying} qualifying "
+                    "variant observations."
+                )
+
+            except Exception as error:
+                failure_rows.append({
+                    "date": date_str,
+                    "error": str(error),
+                })
+
+                print(
+                    f"{date_str}: FAILED - {error}"
+                )
+
+        summary_rows = []
+
+        for variant in variants:
+            variant_name = variant["variant"]
+            records = records_by_variant[variant_name]
+            metrics = metrics_for(records)
+
+            matching_details = [
+                row
+                for row in detail_rows
+                if (
+                    row["variant"] == variant_name
+                    and row["eligible"]
+                )
+            ]
+
+            stop_exits = sum(
+                row["exit_reason"] == "STOP"
+                for row in matching_details
+            )
+
+            stopped_then_target_count = sum(
+                bool(row["stopped_out_then_target"])
+                for row in matching_details
+            )
+
+            risks = [
+                float(row["risk_per_share"])
+                for row in matching_details
+                if row["risk_per_share"] is not None
+            ]
+
+            shares = [
+                int(row["position_shares"])
+                for row in matching_details
+                if row["position_shares"] is not None
+            ]
+
+            summary_rows.append({
+                "variant": variant_name,
+                "entry_variant": variant["entry_variant"],
+                "stop_variant": variant["stop_variant"],
+                "minimum_impulse_atr": (
+                    variant["minimum_impulse_atr"]
+                ),
+                "minimum_duration_minutes": (
+                    variant["minimum_duration_minutes"]
+                ),
+                "stop_buffer_atr": (
+                    variant["stop_buffer_atr"]
+                ),
+                "qualifying_setups": metrics.setups,
+                "entered_trades": metrics.entered_trades,
+                "wins": metrics.wins,
+                "losses": metrics.losses,
+                "stop_exits": stop_exits,
+                "stopped_out_then_target": (
+                    stopped_then_target_count
+                ),
+                "win_rate_pct": metrics.win_rate_pct,
+                "average_return_pct": (
+                    metrics.average_return_pct
+                ),
+                "total_return_pct": (
+                    metrics.total_return_pct
+                ),
+                "profit_factor": metrics.profit_factor,
+                "expectancy_pct": metrics.expectancy_pct,
+                "maximum_drawdown_pct_points": (
+                    metrics.maximum_drawdown_pct_points
+                ),
+                "average_risk_per_share": (
+                    sum(risks) / len(risks)
+                    if risks
+                    else None
+                ),
+                "average_position_shares_at_25_dollars": (
+                    sum(shares) / len(shares)
+                    if shares
+                    else None
+                ),
+            })
+
+        detail_path = (
+            output_directory
+            / "fibonacci_entry_stop_comparison_details.csv"
+        )
+        summary_path = (
+            output_directory
+            / "fibonacci_entry_stop_comparison_summary.csv"
+        )
+        failures_path = (
+            output_directory
+            / "fibonacci_entry_stop_comparison_failures.csv"
+        )
+
+        if detail_rows:
+            with detail_path.open(
+                "w",
+                newline="",
+                encoding="utf-8",
+            ) as file:
+                writer = csv.DictWriter(
+                    file,
+                    fieldnames=list(detail_rows[0].keys()),
+                )
+                writer.writeheader()
+                writer.writerows(detail_rows)
+        else:
+            detail_path.touch()
+
+        with summary_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=list(summary_rows[0].keys()),
+            )
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
+        with failures_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as file:
+            writer = csv.DictWriter(
+                file,
+                fieldnames=["date", "error"],
+            )
+            writer.writeheader()
+            writer.writerows(failure_rows)
+
+        ranked = sorted(
+            summary_rows,
+            key=lambda row: (
+                row["expectancy_pct"]
+                if row["expectancy_pct"] is not None
+                else float("-inf"),
+                row["entered_trades"],
+            ),
+            reverse=True,
+        )
+
+        print()
+        print("===== ENTRY/STOP COMPARISON COMPLETE =====")
+        print(f"Failed sessions: {len(failure_rows)}")
+        print()
+        print("Top variants by expectancy:")
+
+        for row in ranked[:5]:
+            expectancy = (
+                f"{row['expectancy_pct']:.4f}%"
+                if row["expectancy_pct"] is not None
+                else "N/A"
+            )
+            win_rate = (
+                f"{row['win_rate_pct']:.2f}%"
+                if row["win_rate_pct"] is not None
+                else "N/A"
+            )
+
+            print(
+                f"{row['variant']}: "
+                f"{row['entered_trades']} entries, "
+                f"{win_rate} win rate, "
+                f"{expectancy} expectancy, "
+                f"{row['stopped_out_then_target']} "
+                "stopped-then-target."
+            )
+
+        print()
+        print(f"Detailed results: {detail_path}")
+        print(f"Summary results: {summary_path}")
+        print(f"Failed sessions: {failures_path}")
+        print("No real orders were submitted.")
+
+        return detail_path, summary_path, failures_path
 
     def run_fibonacci_impulse_comparison(
         self,

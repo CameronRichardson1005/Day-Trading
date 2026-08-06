@@ -510,6 +510,53 @@ def _simulate_confirmed_trade(
     return result
 
 
+def stopped_out_then_target(
+    *,
+    bars: list[dict[str, Any]],
+    entry_price: float,
+    stop_price: float,
+    target_price: float,
+) -> bool:
+    """
+    Return True when an entered trade reaches its stop first and
+    later reaches the target during the remaining available bars.
+
+    This is a research diagnostic only. It does not alter the
+    conservative stop-first trade outcome.
+    """
+    entered = False
+    stopped = False
+
+    for bar in bars:
+        high = float(bar["h"])
+        low = float(bar["l"])
+
+        if not entered:
+            if high < entry_price:
+                continue
+
+            entered = True
+
+        if not stopped:
+            stop_hit = low <= stop_price
+            target_hit = high >= target_price
+
+            if stop_hit:
+                stopped = True
+
+                # Same-minute stop and target remains conservative.
+                # A later bar must reach the target for this diagnostic.
+                continue
+
+            if target_hit:
+                return False
+
+        elif high >= target_price:
+            return True
+
+    return False
+
+
 def _closed_result(
     *,
     outcome: str,
@@ -591,15 +638,27 @@ def analyse_retracement_level(
     level_name: str,
     ratio: float,
     minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
     zone_tolerance_ratio: float = 0.02,
     minimum_reward_risk: float = 1.5,
     maximum_confirmation_minutes: int = 15,
     tick_size: float = 0.01,
+    stop_buffer_atr: float | None = None,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
     impulse_indices: tuple[int, int] | None = None,
 ) -> RetracementSetup:
     bars = sorted(bars, key=lambda bar: str(bar["t"]))
+
+    if minimum_impulse_duration_minutes < 0:
+        raise ValueError(
+            "Minimum impulse duration cannot be negative."
+        )
+
+    if stop_buffer_atr is not None and stop_buffer_atr < 0:
+        raise ValueError(
+            "ATR stop buffer cannot be negative."
+        )
 
     if atr is None or atr <= 0:
         return _empty_setup(
@@ -656,6 +715,27 @@ def analyse_retracement_level(
     impulse_low = float(impulse_low_bar["l"])
     impulse_high = float(impulse_high_bar["h"])
     impulse_size = impulse_high - impulse_low
+    impulse_duration_minutes = _minutes_between(
+        impulse_low_bar,
+        impulse_high_bar,
+    )
+
+    if (
+        impulse_duration_minutes
+        < minimum_impulse_duration_minutes
+    ):
+        return _empty_setup(
+            date_str=date_str,
+            symbol=symbol,
+            data_feed=data_feed,
+            level_name=level_name,
+            ratio=ratio,
+            atr=atr,
+            reason=(
+                "IMPULSE_DURATION_BELOW_"
+                f"{minimum_impulse_duration_minutes}_MINUTES"
+            ),
+        )
 
     retracement_price = (
         impulse_high - impulse_size * ratio
@@ -739,7 +819,17 @@ def analyse_retracement_level(
     entry_price = (
         float(confirmation_bar["h"]) + tick_size
     )
-    stop_price = pullback_low - tick_size
+
+    stop_buffer = (
+        tick_size
+        if stop_buffer_atr is None
+        else max(
+            tick_size,
+            atr * stop_buffer_atr,
+        )
+    )
+
+    stop_price = pullback_low - stop_buffer
     target_price = impulse_high
 
     risk = entry_price - stop_price
@@ -856,9 +946,8 @@ def analyse_retracement_level(
         impulse_atr_multiple=(
             impulse_size / atr
         ),
-        impulse_duration_minutes=_minutes_between(
-            impulse_low_bar,
-            impulse_high_bar,
+        impulse_duration_minutes=(
+            impulse_duration_minutes
         ),
         impulse_average_volume=impulse_volume,
         retracement_price=retracement_price,
@@ -926,6 +1015,8 @@ def analyse_symbol_day(
     bars: list[dict[str, Any]],
     atr: float | None,
     minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
+    stop_buffer_atr: float | None = None,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
 ) -> list[RetracementSetup]:
@@ -939,6 +1030,10 @@ def analyse_symbol_day(
             level_name=level_name,
             ratio=ratio,
             minimum_impulse_atr=minimum_impulse_atr,
+            minimum_impulse_duration_minutes=(
+                minimum_impulse_duration_minutes
+            ),
+            stop_buffer_atr=stop_buffer_atr,
             slippage_bps=slippage_bps,
             commission_per_share=commission_per_share,
         )
@@ -956,6 +1051,8 @@ def analyse_symbol_day_multiple_impulses(
     bars: list[dict[str, Any]],
     atr: float | None,
     minimum_impulse_atr: float = 1.0,
+    minimum_impulse_duration_minutes: int = 0,
+    stop_buffer_atr: float | None = None,
     slippage_bps: float = 0.0,
     commission_per_share: float = 0.0,
 ) -> list[RetracementSetup]:
@@ -1026,6 +1123,10 @@ def analyse_symbol_day_multiple_impulses(
                     minimum_impulse_atr=(
                         minimum_impulse_atr
                     ),
+                    minimum_impulse_duration_minutes=(
+                        minimum_impulse_duration_minutes
+                    ),
+                    stop_buffer_atr=stop_buffer_atr,
                     slippage_bps=slippage_bps,
                     commission_per_share=(
                         commission_per_share
