@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+import hashlib
+import hmac
+import secrets
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Callable
+
+from .config import (
+    WEBULL_APPROVAL_TTL_SECONDS,
+    WEBULL_ORDER_SUBMISSION_ENABLED,
+    WEBULL_TRADING_KILL_SWITCH,
+)
+from .webull_safety import (
+    WebullAccountState,
+    WebullOrderProposal,
+    WebullSafetyDecision,
+    WebullSafetyGate,
+)
+
+
+class WebullApprovalError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class WebullApprovalTicket:
+    approval_id: str
+    approval_token: str
+    symbol: str
+    quantity: int
+    limit_price: float
+    proposed_exposure: float
+    created_at: datetime
+    expires_at: datetime
+    status: str = "PENDING"
+
+
+@dataclass
+class _ApprovalRecord:
+    approval_id: str
+    token_hash: str
+    proposal_fingerprint: str
+    symbol: str
+    quantity: int
+    limit_price: float
+    proposed_exposure: float
+    created_at: datetime
+    expires_at: datetime
+    status: str = "PENDING"
+    approved_at: datetime | None = None
+    consumed_at: datetime | None = None
+
+
+class WebullApprovalQueue:
+    """
+    One-time manual approval workflow.
+
+    This class does not call Webull and cannot place, replace,
+    modify, or cancel broker orders.
+    """
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        ttl_seconds: int = WEBULL_APPROVAL_TTL_SECONDS,
+    ) -> None:
+        if ttl_seconds <= 0:
+            raise ValueError(
+                "Approval TTL must be positive."
+            )
+
+        self._clock = clock or (
+            lambda: datetime.now(UTC)
+        )
+        self._ttl_seconds = ttl_seconds
+        self._records: dict[str, _ApprovalRecord] = {}
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(
+            token.encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _proposal_fingerprint(
+        proposal: WebullOrderProposal,
+    ) -> str:
+        payload = "|".join([
+            proposal.symbol.strip().upper(),
+            proposal.side.strip().upper(),
+            str(proposal.quantity),
+            f"{proposal.limit_price:.4f}",
+        ])
+
+        return hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
+
+    def _get_record(
+        self,
+        approval_id: str,
+    ) -> _ApprovalRecord:
+        record = self._records.get(approval_id)
+
+        if record is None:
+            raise WebullApprovalError(
+                "APPROVAL_NOT_FOUND"
+            )
+
+        return record
+
+    def _verify_token(
+        self,
+        record: _ApprovalRecord,
+        token: str,
+    ) -> None:
+        supplied_hash = self._token_hash(token)
+
+        if not hmac.compare_digest(
+            record.token_hash,
+            supplied_hash,
+        ):
+            raise WebullApprovalError(
+                "INVALID_APPROVAL_TOKEN"
+            )
+
+    def _reject_if_expired(
+        self,
+        record: _ApprovalRecord,
+    ) -> None:
+        if self._clock() >= record.expires_at:
+            record.status = "EXPIRED"
+
+            raise WebullApprovalError(
+                "APPROVAL_EXPIRED"
+            )
+
+    def create(
+        self,
+        *,
+        proposal: WebullOrderProposal,
+        account: WebullAccountState,
+    ) -> WebullApprovalTicket:
+        preview_decision = WebullSafetyGate.evaluate(
+            account=account,
+            proposal=proposal,
+            require_manual_approval=False,
+        )
+
+        if not preview_decision.allowed:
+            raise WebullApprovalError(
+                "APPROVAL_REQUEST_REJECTED:"
+                f"{preview_decision.reason}"
+            )
+
+        now = self._clock()
+        expires_at = now + timedelta(
+            seconds=self._ttl_seconds
+        )
+
+        approval_id = uuid.uuid4().hex
+        approval_token = secrets.token_urlsafe(32)
+
+        record = _ApprovalRecord(
+            approval_id=approval_id,
+            token_hash=self._token_hash(
+                approval_token
+            ),
+            proposal_fingerprint=(
+                self._proposal_fingerprint(proposal)
+            ),
+            symbol=proposal.symbol.strip().upper(),
+            quantity=proposal.quantity,
+            limit_price=round(
+                proposal.limit_price,
+                4,
+            ),
+            proposed_exposure=(
+                proposal.proposed_exposure
+            ),
+            created_at=now,
+            expires_at=expires_at,
+        )
+
+        self._records[approval_id] = record
+
+        return WebullApprovalTicket(
+            approval_id=approval_id,
+            approval_token=approval_token,
+            symbol=record.symbol,
+            quantity=record.quantity,
+            limit_price=record.limit_price,
+            proposed_exposure=record.proposed_exposure,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
+
+    def approve(
+        self,
+        *,
+        approval_id: str,
+        approval_token: str,
+    ) -> None:
+        record = self._get_record(approval_id)
+        self._verify_token(
+            record,
+            approval_token,
+        )
+        self._reject_if_expired(record)
+
+        if record.status == "CONSUMED":
+            raise WebullApprovalError(
+                "APPROVAL_ALREADY_CONSUMED"
+            )
+
+        if record.status == "APPROVED":
+            raise WebullApprovalError(
+                "APPROVAL_ALREADY_APPROVED"
+            )
+
+        if record.status != "PENDING":
+            raise WebullApprovalError(
+                f"APPROVAL_NOT_PENDING:{record.status}"
+            )
+
+        record.status = "APPROVED"
+        record.approved_at = self._clock()
+
+    def claim_for_submission(
+        self,
+        *,
+        approval_id: str,
+        approval_token: str,
+        proposal: WebullOrderProposal,
+        current_account: WebullAccountState,
+    ) -> WebullSafetyDecision:
+        record = self._get_record(approval_id)
+        self._verify_token(
+            record,
+            approval_token,
+        )
+        self._reject_if_expired(record)
+
+        if record.status == "CONSUMED":
+            raise WebullApprovalError(
+                "APPROVAL_ALREADY_CONSUMED"
+            )
+
+        if record.status != "APPROVED":
+            raise WebullApprovalError(
+                "APPROVAL_NOT_APPROVED"
+            )
+
+        current_fingerprint = (
+            self._proposal_fingerprint(proposal)
+        )
+
+        if not hmac.compare_digest(
+            record.proposal_fingerprint,
+            current_fingerprint,
+        ):
+            raise WebullApprovalError(
+                "ORDER_CHANGED_AFTER_APPROVAL"
+            )
+
+        if WEBULL_TRADING_KILL_SWITCH:
+            raise WebullApprovalError(
+                "TRADING_KILL_SWITCH_ACTIVE"
+            )
+
+        if not WEBULL_ORDER_SUBMISSION_ENABLED:
+            raise WebullApprovalError(
+                "REAL_ORDER_SUBMISSION_DISABLED"
+            )
+
+        approved_proposal = WebullOrderProposal(
+            symbol=proposal.symbol,
+            side=proposal.side,
+            quantity=proposal.quantity,
+            limit_price=proposal.limit_price,
+            manually_approved=True,
+        )
+
+        final_decision = WebullSafetyGate.evaluate(
+            account=current_account,
+            proposal=approved_proposal,
+        )
+
+        if not final_decision.allowed:
+            raise WebullApprovalError(
+                "FINAL_SAFETY_RECHECK_FAILED:"
+                f"{final_decision.reason}"
+            )
+
+        record.status = "CONSUMED"
+        record.consumed_at = self._clock()
+
+        return final_decision
+
+    def status(
+        self,
+        approval_id: str,
+    ) -> str:
+        record = self._get_record(approval_id)
+
+        if (
+            record.status in {"PENDING", "APPROVED"}
+            and self._clock() >= record.expires_at
+        ):
+            record.status = "EXPIRED"
+
+        return record.status

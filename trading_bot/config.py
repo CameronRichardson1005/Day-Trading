@@ -261,3 +261,21 @@ if (
         "Webull operational exposure cap cannot exceed "
         "the hard total-exposure cap."
     )
+
+# Webull manual approval workflow.
+WEBULL_APPROVAL_TTL_SECONDS = int(
+    os.getenv(
+        "WEBULL_APPROVAL_TTL_SECONDS",
+        "300",
+    )
+)
+
+if WEBULL_APPROVAL_TTL_SECONDS <= 0:
+    raise RuntimeError(
+        "WEBULL_APPROVAL_TTL_SECONDS must be positive."
+    )
+
+# Hard fail-safe. The approval workflow may be tested while
+# this remains active, but no approved order can be claimed
+# for submission.
+WEBULL_TRADING_KILL_SWITCH = True
