@@ -3811,6 +3811,112 @@ class TradingBot:
             approval_token=approval_token,
         )
 
+    def process_webull_paper_confirmations(
+            self,
+            *,
+            preview_results: list[dict],
+            input_fn=input,
+    ) -> list[WebullPaperOrderRecord]:
+        """
+        Offer one interactive confirmation for each ready local
+        paper preview.
+
+        Approval IDs and one-time tokens remain internal to this
+        process. No Webull broker order is submitted.
+        """
+        submitted_records: list[WebullPaperOrderRecord] = []
+
+        for preview in preview_results:
+            if preview.get("status") != "PREVIEW READY":
+                continue
+
+            symbol = str(
+                preview.get("symbol", "")
+            ).strip().upper()
+
+            if not symbol:
+                continue
+
+            print()
+            print(
+                f"{symbol}: LOCAL PAPER TRADE READY"
+            )
+            print(
+                f"Shares: {preview['quantity']} · "
+                f"Limit: ${preview['limitBuy']:.4f} · "
+                f"Exposure: "
+                f"${preview['estimatedPositionValue']:.2f} · "
+                f"Trading stop: "
+                f"${preview['tradingStopLoss']:.4f}"
+            )
+            print(
+                "This records a LOCAL PAPER order only. "
+                "No Webull broker order will be submitted."
+            )
+
+            try:
+                response = input_fn(
+                    f"Approve LOCAL PAPER trade for "
+                    f"{symbol}? [y/N]: "
+                )
+            except (EOFError, KeyboardInterrupt):
+                print(
+                    f"{symbol}: LOCAL PAPER trade declined."
+                )
+                continue
+
+            if response.strip().lower() not in {
+                "y",
+                "yes",
+            }:
+                print(
+                    f"{symbol}: LOCAL PAPER trade declined."
+                )
+                continue
+
+            try:
+                ticket = self.request_webull_approval(
+                    symbol
+                )
+
+                status = self.confirm_webull_approval(
+                    approval_id=ticket.approval_id,
+                    approval_token=ticket.approval_token,
+                )
+
+                if status != "APPROVED":
+                    raise WebullApprovalError(
+                        "APPROVAL_CONFIRMATION_FAILED"
+                    )
+
+                record = self.submit_webull_paper_order(
+                    symbol=symbol,
+                    approval_id=ticket.approval_id,
+                    approval_token=ticket.approval_token,
+                )
+
+            except Exception as error:
+                print(
+                    f"{symbol}: LOCAL PAPER trade failed · "
+                    f"{error}"
+                )
+                continue
+
+            submitted_records.append(record)
+
+            print()
+            print(
+                f"{symbol}: PAPER ORDER RECORDED"
+            )
+            print(
+                f"Status: {record.status}"
+            )
+            print(
+                "NO WEBULL BROKER ORDER WAS SUBMITTED"
+            )
+
+        return submitted_records
+
     def prepare_webull_previews(
             self,
     ) -> list[dict]:
@@ -3879,6 +3985,7 @@ class TradingBot:
             self,
             date_str: str,
             initialise_sheets: bool = True,
+            interactive_paper_confirmation: bool = False,
     ) -> None:
         """
         Write current strategy state to Google Sheets and prepare
@@ -3918,7 +4025,12 @@ class TradingBot:
                 f"Error: {error}"
             )
 
-        self.prepare_webull_previews()
+        preview_results = self.prepare_webull_previews()
+
+        if interactive_paper_confirmation:
+            self.process_webull_paper_confirmations(
+                preview_results=preview_results,
+            )
 
         try:
             self.sheets.write_orders(
@@ -4255,6 +4367,7 @@ class TradingBot:
                     self.publish_current_strategy_results(
                         date_str=date_str,
                         initialise_sheets=False,
+                        interactive_paper_confirmation=True,
                     )
                 else:
                     print(
@@ -4309,6 +4422,7 @@ class TradingBot:
             self.publish_current_strategy_results(
                 date_str=date_str,
                 initialise_sheets=False,
+                interactive_paper_confirmation=True,
             )
 
         print()
