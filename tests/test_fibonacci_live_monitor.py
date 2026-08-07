@@ -523,3 +523,122 @@ def test_monitor_logs_and_catches_up_after_long_gap(
         "evaluate",
         "11:00:00",
     ) in events
+
+
+def test_monitor_continues_after_evaluation_failure(
+        monkeypatch,
+):
+    events = []
+    bot = make_bot(events)
+
+    evaluation_calls = 0
+
+    def evaluate_with_temporary_failure(**kwargs):
+        nonlocal evaluation_calls
+        evaluation_calls += 1
+
+        evaluation_time = kwargs[
+            "evaluation_end"
+        ].strftime("%H:%M:%S")
+
+        events.append(
+            ("evaluate_attempt", evaluation_time)
+        )
+
+        if evaluation_calls == 1:
+            raise ConnectionError(
+                "temporary Alpaca connection failure"
+            )
+
+        events.append(
+            ("evaluate_success", evaluation_time)
+        )
+
+    bot.evaluate_active_strategy = (
+        evaluate_with_temporary_failure
+    )
+
+    signature_calls = 0
+
+    def current_signature():
+        nonlocal signature_calls
+        signature_calls += 1
+        return ()
+
+    bot.current_signal_signature = current_signature
+
+    monkeypatch.setattr(
+        bot_module,
+        "ACTIVE_STRATEGY",
+        "FIBONACCI_61_8",
+    )
+    monkeypatch.setattr(
+        bot_module,
+        "FIBONACCI_MONITOR_CUTOFF",
+        "09:47",
+    )
+
+    bot.run_fibonacci_monitor(
+        date_str="2026-08-03",
+        write_sheets=False,
+        publish_dashboard=False,
+        now_fn=sequence_clock([
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                5,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                45,
+                5,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                46,
+                5,
+                tzinfo=EASTERN,
+            ),
+            datetime(
+                2026,
+                8,
+                3,
+                9,
+                47,
+                0,
+                tzinfo=EASTERN,
+            ),
+        ]),
+        sleep_fn=lambda seconds: events.append(
+            ("sleep", seconds)
+        ),
+    )
+
+    assert (
+        "evaluate_attempt",
+        "09:45:00",
+    ) in events
+
+    assert (
+        "evaluate_success",
+        "09:46:00",
+    ) in events
+
+    # Failed evaluation must not be treated as
+    # a valid strategy result.
+    assert signature_calls == 2
+
+    # First monitor evaluation fails, second succeeds,
+    # then the final cutoff evaluation succeeds.
+    assert evaluation_calls == 3
