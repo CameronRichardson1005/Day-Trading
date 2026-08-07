@@ -4225,11 +4225,24 @@ class TradingBot:
                 microsecond=0,
             )
 
-            self.evaluate_active_strategy(
-                date_str=date_str,
-                evaluation_end=evaluation_end,
-                data_feed=MARKET_DATA_FEED,
-            )
+            try:
+                self.evaluate_active_strategy(
+                    date_str=date_str,
+                    evaluation_end=evaluation_end,
+                    data_feed=MARKET_DATA_FEED,
+                )
+            except Exception as error:
+                print(
+                    "WARNING: Fibonacci evaluation failed for "
+                    f"{evaluation_end.strftime('%H:%M:%S')}: "
+                    f"{error}. Skipping this evaluation and "
+                    "continuing the live monitor."
+                )
+
+                sleep_fn(
+                    FIBONACCI_MONITOR_INTERVAL_SECONDS
+                )
+                continue
 
             signature = self.current_signal_signature()
 
