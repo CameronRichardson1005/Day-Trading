@@ -4456,6 +4456,7 @@ class TradingBot:
             *,
             preview_results: list[dict],
             input_fn=input,
+            date_str: str | None = None,
     ) -> list[WebullPaperOrderRecord]:
         """
         Offer one interactive confirmation for each ready local
@@ -4465,6 +4466,23 @@ class TradingBot:
         process. No Webull broker order is submitted.
         """
         submitted_records: list[WebullPaperOrderRecord] = []
+
+        if date_str is None:
+            date_str = datetime.now(
+                ZoneInfo("America/New_York")
+            ).strftime("%Y-%m-%d")
+
+        tracker = getattr(
+            self,
+            "webull_paper_lifecycle_tracker",
+            None,
+        )
+
+        portfolio_store = (
+            tracker.store
+            if tracker is not None
+            else None
+        )
 
         for preview in preview_results:
             if preview.get("status") != "PREVIEW READY":
@@ -4493,6 +4511,51 @@ class TradingBot:
                 "This records a LOCAL PAPER order only. "
                 "No Webull broker order will be submitted."
             )
+
+            try:
+                paper_risk = (
+                    load_webull_paper_risk_status(
+                        date_str=date_str,
+                        store=portfolio_store,
+                    )
+                )
+            except Exception as error:
+                paper_risk = None
+                print(
+                    "Paper risk status: UNAVAILABLE · "
+                    "the final submission check will still "
+                    "fail closed if risk cannot be verified."
+                )
+            else:
+                print(
+                    "Paper risk: "
+                    f"{'TRADING ALLOWED' if paper_risk.trading_allowed else 'TRADING HALTED'}"
+                )
+                print(
+                    "Available for new orders: "
+                    f"${paper_risk.available_for_new_orders:.2f} · "
+                    "Pending reserved: "
+                    f"${paper_risk.pending_reserved_cash:.2f}"
+                )
+                print(
+                    "Daily realized P&L: "
+                    f"${paper_risk.daily_realized_pnl:.2f} · "
+                    "Remaining daily loss: "
+                    f"${paper_risk.remaining_daily_loss:.2f} "
+                    f"of ${paper_risk.max_daily_loss:.2f}"
+                )
+
+                if not paper_risk.trading_allowed:
+                    print(
+                        f"{symbol}: "
+                        f"{self._paper_trade_failure_message(
+                            RuntimeError(paper_risk.reason)
+                        )}"
+                    )
+                    print(
+                        "NO WEBULL BROKER ORDER WAS SUBMITTED"
+                    )
+                    continue
 
             try:
                 response = input_fn(
@@ -4673,6 +4736,7 @@ class TradingBot:
         if interactive_paper_confirmation:
             self.process_webull_paper_confirmations(
                 preview_results=preview_results,
+                date_str=date_str,
             )
 
         try:
