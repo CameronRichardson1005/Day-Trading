@@ -305,3 +305,89 @@ def test_invalid_daily_loss_fails_closed(
         match="INVALID_PAPER_MAX_DAILY_LOSS",
     ):
         configured_paper_max_daily_loss()
+
+
+def test_risk_status_reports_trading_allowed():
+    from trading_bot.webull_paper_risk import (
+        build_webull_paper_risk_status,
+    )
+
+    status = build_webull_paper_risk_status(
+        records=[],
+        now=NOW,
+        starting_cash=1000,
+        max_daily_loss=50,
+    )
+
+    assert status.trading_allowed is True
+    assert status.reason == "PAPER_TRADING_ALLOWED"
+    assert status.available_for_new_orders == 1000
+    assert status.remaining_daily_loss == 50
+    assert status.simulation_only is True
+    assert status.broker_submitted is False
+
+
+def test_risk_status_reports_daily_loss_halt():
+    from trading_bot.webull_paper_risk import (
+        build_webull_paper_risk_status,
+    )
+
+    status = build_webull_paper_risk_status(
+        records=[
+            closed_record(
+                realized_pnl=-50,
+            )
+        ],
+        now=NOW,
+        starting_cash=1000,
+        max_daily_loss=50,
+    )
+
+    assert status.trading_allowed is False
+    assert status.reason == (
+        "PAPER_DAILY_LOSS_LIMIT_REACHED"
+    )
+    assert status.daily_realized_pnl == -50
+    assert status.remaining_daily_loss == 0
+
+
+def test_risk_status_reserves_pending_cash():
+    from trading_bot.webull_paper_risk import (
+        build_webull_paper_risk_status,
+    )
+
+    status = build_webull_paper_risk_status(
+        records=[
+            record(
+                exposure=750,
+            )
+        ],
+        now=NOW,
+        starting_cash=1000,
+        max_daily_loss=50,
+    )
+
+    assert status.trading_allowed is True
+    assert status.pending_reserved_cash == 750
+    assert status.available_for_new_orders == 250
+
+
+def test_risk_status_blocks_when_no_cash_remains():
+    from trading_bot.webull_paper_risk import (
+        build_webull_paper_risk_status,
+    )
+
+    status = build_webull_paper_risk_status(
+        records=[
+            record(
+                exposure=1000,
+            )
+        ],
+        now=NOW,
+        starting_cash=1000,
+        max_daily_loss=50,
+    )
+
+    assert status.trading_allowed is False
+    assert status.reason == "PAPER_NO_AVAILABLE_CASH"
+    assert status.available_for_new_orders == 0

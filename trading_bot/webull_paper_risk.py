@@ -262,3 +262,96 @@ def evaluate_webull_paper_risk(
         allowed=True,
         reason="PAPER_RISK_APPROVED",
     )
+
+
+@dataclass(frozen=True)
+class WebullPaperRiskStatus:
+    trading_allowed: bool
+    reason: str
+    starting_cash: float
+    cash: float
+    pending_reserved_cash: float
+    available_for_new_orders: float
+    daily_realized_pnl: float
+    max_daily_loss: float
+    remaining_daily_loss: float
+    simulation_only: bool = True
+    broker_submitted: bool = False
+
+
+def build_webull_paper_risk_status(
+    *,
+    records: list[WebullPaperOrderRecord],
+    now: datetime,
+    starting_cash: float | None = None,
+    max_daily_loss: float | None = None,
+) -> WebullPaperRiskStatus:
+    """
+    Build a read-only LOCAL PAPER risk snapshot.
+
+    It does not consume approvals and cannot submit broker orders.
+    """
+    if starting_cash is None:
+        starting_cash = configured_paper_starting_cash()
+
+    if max_daily_loss is None:
+        max_daily_loss = configured_paper_max_daily_loss()
+
+    portfolio = build_webull_paper_portfolio(
+        records=records,
+        starting_cash=starting_cash,
+    )
+
+    pending_reserved_cash = round(
+        sum(
+            float(record.proposed_exposure)
+            for record in records
+            if record.lifecycle_status
+            == "ENTRY PENDING"
+        ),
+        6,
+    )
+
+    available_for_new_orders = round(
+        max(
+            portfolio.cash - pending_reserved_cash,
+            0.0,
+        ),
+        6,
+    )
+
+    daily_realized_pnl = _daily_realized_pnl(
+        records=records,
+        now=now,
+    )
+
+    remaining_daily_loss = round(
+        max(
+            float(max_daily_loss)
+            + daily_realized_pnl,
+            0.0,
+        ),
+        6,
+    )
+
+    if daily_realized_pnl <= -float(max_daily_loss):
+        trading_allowed = False
+        reason = "PAPER_DAILY_LOSS_LIMIT_REACHED"
+    elif available_for_new_orders <= 0:
+        trading_allowed = False
+        reason = "PAPER_NO_AVAILABLE_CASH"
+    else:
+        trading_allowed = True
+        reason = "PAPER_TRADING_ALLOWED"
+
+    return WebullPaperRiskStatus(
+        trading_allowed=trading_allowed,
+        reason=reason,
+        starting_cash=round(float(starting_cash), 2),
+        cash=portfolio.cash,
+        pending_reserved_cash=pending_reserved_cash,
+        available_for_new_orders=available_for_new_orders,
+        daily_realized_pnl=daily_realized_pnl,
+        max_daily_loss=round(float(max_daily_loss), 2),
+        remaining_daily_loss=remaining_daily_loss,
+    )

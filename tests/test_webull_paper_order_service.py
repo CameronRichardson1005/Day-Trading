@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -10,6 +11,7 @@ from trading_bot.webull_paper_order_service import (
     WebullPaperOrderServiceError,
 )
 from trading_bot.webull_paper_order_store import (
+    WebullPaperOrderRecord,
     WebullPaperOrderStore,
 )
 from trading_bot.webull_preview_store import (
@@ -558,3 +560,87 @@ def test_pending_paper_order_reserves_cash_before_second_submission(
     ) == "APPROVED"
 
     assert len(store.load()) == 1
+
+
+def test_daily_loss_halt_blocks_service_before_approval_consumption(
+    tmp_path,
+    monkeypatch,
+):
+    service, queue, ticket, snapshot, store = (
+        build_service(tmp_path)
+    )
+
+    monkeypatch.setenv(
+        "WEBULL_PAPER_STARTING_CASH",
+        "10000",
+    )
+    monkeypatch.setenv(
+        "WEBULL_PAPER_MAX_DAILY_LOSS",
+        "50",
+    )
+
+    loss_time = datetime(
+        2026,
+        8,
+        6,
+        19,
+        30,
+        tzinfo=UTC,
+    )
+
+    prior = WebullPaperOrderRecord(
+        paper_order_id="prior-loss",
+        approval_reference="prior-approval",
+        idempotency_key="prior-key",
+        symbol="SOUN",
+        side="BUY",
+        quantity=10,
+        limit_price=10.0,
+        proposed_exposure=100.0,
+        status="PAPER SUBMITTED",
+        created_at=loss_time,
+        submitted_at=loss_time,
+        safety_reason="APPROVED_BY_SAFETY_GATE",
+        target_price=11.0,
+        stop_price=5.0,
+        lifecycle_status="CLOSED",
+        filled_at=loss_time,
+        fill_price=10.0,
+        highest_price=10.0,
+        lowest_price=5.0,
+        mfe_pct=0.0,
+        mae_pct=-50.0,
+        closed_at=loss_time,
+        exit_price=5.0,
+        exit_reason="STOP",
+        realized_pnl=-50.0,
+        return_pct=-50.0,
+    )
+
+    store.add(prior)
+
+    with pytest.raises(
+        WebullPaperOrderServiceError,
+        match="PAPER_DAILY_LOSS_LIMIT_REACHED",
+    ):
+        service.submit_paper_order(
+            symbol="OPEN",
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+        )
+
+    # Portfolio risk is checked before the existing
+    # Webull account snapshot / approval claim.
+    assert snapshot.calls == 0
+
+    # The user's approval remains available rather than being
+    # incorrectly consumed by a blocked paper submission.
+    assert queue.status(ticket.approval_id) == (
+        "APPROVED"
+    )
+
+    persisted = store.load()
+
+    assert set(persisted) == {
+        "prior-loss",
+    }

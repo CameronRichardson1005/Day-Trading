@@ -192,16 +192,6 @@ class WebullPaperOrderService:
                 "DUPLICATE_PAPER_SUBMISSION"
             )
 
-        try:
-            current_account = (
-                self.snapshot_client
-                .get_account_state()
-            )
-        except Exception as error:
-            raise WebullPaperOrderServiceError(
-                "ACCOUNT_SNAPSHOT_FAILED"
-            ) from error
-
         submitted_at = self.clock()
 
         if submitted_at.tzinfo is None:
@@ -232,6 +222,16 @@ class WebullPaperOrderService:
             raise WebullPaperOrderServiceError(
                 paper_risk.reason
             )
+
+        try:
+            current_account = (
+                self.snapshot_client
+                .get_account_state()
+            )
+        except Exception as error:
+            raise WebullPaperOrderServiceError(
+                "ACCOUNT_SNAPSHOT_FAILED"
+            ) from error
 
         try:
             safety = (
