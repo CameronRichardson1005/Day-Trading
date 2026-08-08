@@ -110,6 +110,7 @@ class TradingBot:
         # live monitor does not repeatedly request the same
         # opening bars and ATR history from Alpaca.
         self._fibonacci_session_static_cache = {}
+        self._fibonacci_intraday_bar_cache = {}
 
         try:
             self.webull_approval_queue = (
@@ -3478,6 +3479,143 @@ class TradingBot:
 
         return result
 
+    def _get_fibonacci_intraday_bars(
+            self,
+            *,
+            date_str: str,
+            data_feed: str,
+            session_start: datetime,
+            evaluation_end: datetime,
+    ) -> dict[str, list[dict]]:
+        """
+        Return complete intraday Fibonacci history while only
+        requesting newly available one-minute bars from Alpaca.
+
+        The cache is isolated by trading date, feed, and selected
+        symbols. Each incremental request overlaps the previous
+        boundary by one minute and bars are deduplicated by
+        timestamp, allowing late/revised data to be reconciled.
+        """
+        utc = ZoneInfo("UTC")
+
+        cache = getattr(
+            self,
+            "_fibonacci_intraday_bar_cache",
+            None,
+        )
+
+        if cache is None:
+            cache = {}
+            self._fibonacci_intraday_bar_cache = cache
+
+        cache_key = (
+            date_str,
+            data_feed.strip().lower(),
+            self.symbols_csv,
+        )
+
+        entry = cache.get(cache_key)
+
+        if entry is None:
+            entry = {
+                "bars": {
+                    symbol: []
+                    for symbol in self.stocks
+                },
+                "fetched_through": None,
+            }
+            cache[cache_key] = entry
+
+        fetched_through = entry["fetched_through"]
+
+        # If this request is already covered by the cache, avoid
+        # another Alpaca call and return only bars before the
+        # requested completed-bar boundary.
+        if (
+            fetched_through is not None
+            and evaluation_end <= fetched_through
+        ):
+            end_iso = evaluation_end.astimezone(
+                utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            return {
+                symbol: [
+                    bar
+                    for bar in entry["bars"].get(
+                        symbol,
+                        [],
+                    )
+                    if str(bar["t"]) < end_iso
+                ]
+                for symbol in self.stocks
+            }
+
+        if fetched_through is None:
+            fetch_start = session_start
+        else:
+            # Deliberately overlap by one minute. This allows a
+            # late IEX bar at the previous boundary to be picked
+            # up without creating duplicates in the cache.
+            fetch_start = max(
+                session_start,
+                fetched_through - timedelta(minutes=1),
+            )
+
+        start_iso = fetch_start.astimezone(
+            utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        end_iso = evaluation_end.astimezone(
+            utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        incremental = (
+            self.alpaca.get_historical_1min_bars(
+                symbols_csv=self.symbols_csv,
+                start_iso=start_iso,
+                end_iso=end_iso,
+                feed=data_feed,
+            )
+        )
+
+        merged_by_symbol = {}
+
+        for symbol in self.stocks:
+            by_timestamp = {
+                str(bar["t"]): bar
+                for bar in entry["bars"].get(
+                    symbol,
+                    [],
+                )
+            }
+
+            for bar in incremental.get(symbol, []):
+                by_timestamp[str(bar["t"])] = bar
+
+            merged_by_symbol[symbol] = sorted(
+                by_timestamp.values(),
+                key=lambda bar: str(bar["t"]),
+            )
+
+        # Only update the cache after the Alpaca request and merge
+        # complete successfully. A failed request therefore leaves
+        # the previous known-good cache untouched.
+        entry["bars"] = merged_by_symbol
+        entry["fetched_through"] = evaluation_end
+
+        return {
+            symbol: [
+                bar
+                for bar in merged_by_symbol.get(
+                    symbol,
+                    [],
+                )
+                if str(bar["t"]) < end_iso
+            ]
+            for symbol in self.stocks
+        }
+
     def _calculate_fibonacci_strategy(
             self,
             date_str: str,
@@ -3552,15 +3690,11 @@ class TradingBot:
             }
         else:
             bars_by_symbol = (
-                self.alpaca.get_historical_1min_bars(
-                    symbols_csv=self.symbols_csv,
-                    start_iso=session_start.astimezone(
-                        utc
-                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    end_iso=evaluation_end_eastern.astimezone(
-                        utc
-                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    feed=data_feed,
+                self._get_fibonacci_intraday_bars(
+                    date_str=date_str,
+                    data_feed=data_feed,
+                    session_start=session_start,
+                    evaluation_end=evaluation_end_eastern,
                 )
             )
 
