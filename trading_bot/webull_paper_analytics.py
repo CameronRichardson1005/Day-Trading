@@ -58,6 +58,11 @@ class WebullPaperAnalyticsReport:
     by_symbol: tuple[WebullPaperAnalyticsGroup, ...]
     by_entry_time: tuple[WebullPaperAnalyticsGroup, ...]
 
+    by_reward_risk: tuple[WebullPaperAnalyticsGroup, ...]
+    by_impulse_atr: tuple[WebullPaperAnalyticsGroup, ...]
+    by_pullback_volume: tuple[WebullPaperAnalyticsGroup, ...]
+    by_confirmation_time: tuple[WebullPaperAnalyticsGroup, ...]
+
     simulation_only: bool = True
     broker_submitted: bool = False
 
@@ -122,6 +127,147 @@ def _entry_time_bucket(
     return (
         f"{local.hour:02d}:{start_minute:02d}"
         f"-{local.hour:02d}:{end_minute:02d} ET"
+    )
+
+
+def _reward_risk_bucket(
+    record: WebullPaperOrderRecord,
+) -> str:
+    value = record.reward_risk
+
+    if value is None:
+        return "UNAVAILABLE"
+
+    value = float(value)
+
+    if value < 1.50:
+        return "<1.50"
+    if value < 2.00:
+        return "1.50-1.99"
+    if value < 2.50:
+        return "2.00-2.49"
+
+    return ">=2.50"
+
+
+def _impulse_atr_bucket(
+    record: WebullPaperOrderRecord,
+) -> str:
+    value = record.impulse_atr_multiple
+
+    if value is None:
+        return "UNAVAILABLE"
+
+    value = float(value)
+
+    if value < 0.50:
+        return "<0.50 ATR"
+    if value < 0.75:
+        return "0.50-0.74 ATR"
+    if value < 1.00:
+        return "0.75-0.99 ATR"
+    if value < 1.50:
+        return "1.00-1.49 ATR"
+
+    return ">=1.50 ATR"
+
+
+def _pullback_volume_bucket(
+    record: WebullPaperOrderRecord,
+) -> str:
+    value = record.pullback_volume_ratio
+
+    if value is None:
+        return "UNAVAILABLE"
+
+    value = float(value)
+
+    if value < 0.50:
+        return "<0.50"
+    if value < 0.75:
+        return "0.50-0.74"
+    if value < 1.00:
+        return "0.75-0.99"
+
+    return ">=1.00"
+
+
+def _confirmation_time_bucket(
+    record: WebullPaperOrderRecord,
+) -> str:
+    value = record.confirmation_time
+
+    if value is None or not value.strip():
+        return "UNAVAILABLE"
+
+    raw = value.strip()
+    eastern = ZoneInfo("America/New_York")
+
+    parsed = None
+
+    try:
+        parsed = datetime.fromisoformat(
+            raw.replace("Z", "+00:00")
+        )
+    except ValueError:
+        try:
+            parsed = datetime.strptime(
+                raw,
+                "%H:%M",
+            )
+        except ValueError:
+            return "UNPARSEABLE"
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(eastern)
+
+    hour = parsed.hour
+    minute = parsed.minute
+
+    if minute < 15:
+        start_minute = 0
+        end_minute = 14
+    elif minute < 30:
+        start_minute = 15
+        end_minute = 29
+    elif minute < 45:
+        start_minute = 30
+        end_minute = 44
+    else:
+        start_minute = 45
+        end_minute = 59
+
+    return (
+        f"{hour:02d}:{start_minute:02d}"
+        f"-{hour:02d}:{end_minute:02d} ET"
+    )
+
+
+def _group_records_by(
+    *,
+    records: list[WebullPaperOrderRecord],
+    bucket_fn,
+) -> tuple[WebullPaperAnalyticsGroup, ...]:
+    grouped: dict[
+        str,
+        list[WebullPaperOrderRecord],
+    ] = {}
+
+    for record in records:
+        key = bucket_fn(record)
+
+        grouped.setdefault(
+            key,
+            [],
+        ).append(record)
+
+    return tuple(
+        _group(
+            key=key,
+            records=group_records,
+        )
+        for key, group_records
+        in sorted(grouped.items())
     )
 
 
@@ -356,6 +502,26 @@ def build_webull_paper_analytics(
         )
     )
 
+    by_reward_risk = _group_records_by(
+        records=records,
+        bucket_fn=_reward_risk_bucket,
+    )
+
+    by_impulse_atr = _group_records_by(
+        records=records,
+        bucket_fn=_impulse_atr_bucket,
+    )
+
+    by_pullback_volume = _group_records_by(
+        records=records,
+        bucket_fn=_pullback_volume_bucket,
+    )
+
+    by_confirmation_time = _group_records_by(
+        records=records,
+        bucket_fn=_confirmation_time_bucket,
+    )
+
     closed_count = len(closed)
 
     return WebullPaperAnalyticsReport(
@@ -386,6 +552,12 @@ def build_webull_paper_analytics(
         ),
         by_symbol=by_symbol,
         by_entry_time=by_entry_time,
+        by_reward_risk=by_reward_risk,
+        by_impulse_atr=by_impulse_atr,
+        by_pullback_volume=by_pullback_volume,
+        by_confirmation_time=(
+            by_confirmation_time
+        ),
     )
 
 

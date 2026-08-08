@@ -352,3 +352,266 @@ def test_loader_reads_durable_paper_store(
     assert report.realized_pnl == 5
     assert report.simulation_only is True
     assert report.broker_submitted is False
+
+
+def enriched_closed_order(
+    *,
+    order_id,
+    pnl,
+    reward_risk,
+    impulse_atr,
+    pullback_volume,
+    confirmation_time,
+):
+    trade = closed_order(
+        order_id=order_id,
+        symbol="OPEN",
+        pnl=pnl,
+        return_pct=pnl,
+        reason=(
+            "TARGET"
+            if pnl > 0
+            else "STOP"
+        ),
+        fill_hour=14,
+        fill_minute=5,
+        mfe=max(pnl, 1),
+        mae=min(pnl, -1),
+    )
+
+    return replace(
+        trade,
+        strategy_name="FIBONACCI_61_8",
+        reward_risk=reward_risk,
+        confirmation_time=confirmation_time,
+        retracement_price=9.8,
+        impulse_atr_multiple=impulse_atr,
+        pullback_volume_ratio=pullback_volume,
+    )
+
+
+def test_analytics_groups_by_reward_risk():
+    records = [
+        enriched_closed_order(
+            order_id="1",
+            pnl=5,
+            reward_risk=1.75,
+            impulse_atr=0.6,
+            pullback_volume=0.8,
+            confirmation_time="10:07",
+        ),
+        enriched_closed_order(
+            order_id="2",
+            pnl=-2,
+            reward_risk=2.20,
+            impulse_atr=0.8,
+            pullback_volume=0.6,
+            confirmation_time="10:20",
+        ),
+        enriched_closed_order(
+            order_id="3",
+            pnl=4,
+            reward_risk=2.75,
+            impulse_atr=1.2,
+            pullback_volume=0.4,
+            confirmation_time="10:35",
+        ),
+    ]
+
+    report = build_webull_paper_analytics(
+        records=records,
+    )
+
+    low = next(
+        group
+        for group in report.by_reward_risk
+        if group.key == "1.50-1.99"
+    )
+
+    middle = next(
+        group
+        for group in report.by_reward_risk
+        if group.key == "2.00-2.49"
+    )
+
+    high = next(
+        group
+        for group in report.by_reward_risk
+        if group.key == ">=2.50"
+    )
+
+    assert low.realized_pnl == 5
+    assert middle.realized_pnl == -2
+    assert high.realized_pnl == 4
+
+
+def test_analytics_groups_by_impulse_strength():
+    records = [
+        enriched_closed_order(
+            order_id="1",
+            pnl=3,
+            reward_risk=2.0,
+            impulse_atr=0.60,
+            pullback_volume=0.8,
+            confirmation_time="10:07",
+        ),
+        enriched_closed_order(
+            order_id="2",
+            pnl=-1,
+            reward_risk=2.0,
+            impulse_atr=0.85,
+            pullback_volume=0.8,
+            confirmation_time="10:08",
+        ),
+        enriched_closed_order(
+            order_id="3",
+            pnl=5,
+            reward_risk=2.0,
+            impulse_atr=1.20,
+            pullback_volume=0.8,
+            confirmation_time="10:09",
+        ),
+    ]
+
+    report = build_webull_paper_analytics(
+        records=records,
+    )
+
+    assert {
+        group.key
+        for group in report.by_impulse_atr
+    } == {
+        "0.50-0.74 ATR",
+        "0.75-0.99 ATR",
+        "1.00-1.49 ATR",
+    }
+
+
+def test_analytics_groups_by_pullback_volume():
+    records = [
+        enriched_closed_order(
+            order_id="1",
+            pnl=4,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.40,
+            confirmation_time="10:07",
+        ),
+        enriched_closed_order(
+            order_id="2",
+            pnl=-2,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.65,
+            confirmation_time="10:08",
+        ),
+        enriched_closed_order(
+            order_id="3",
+            pnl=1,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.85,
+            confirmation_time="10:09",
+        ),
+    ]
+
+    report = build_webull_paper_analytics(
+        records=records,
+    )
+
+    keys = {
+        group.key
+        for group in report.by_pullback_volume
+    }
+
+    assert keys == {
+        "<0.50",
+        "0.50-0.74",
+        "0.75-0.99",
+    }
+
+
+def test_analytics_groups_by_confirmation_time():
+    records = [
+        enriched_closed_order(
+            order_id="1",
+            pnl=4,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.5,
+            confirmation_time="10:07",
+        ),
+        enriched_closed_order(
+            order_id="2",
+            pnl=-2,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.5,
+            confirmation_time="10:12",
+        ),
+        enriched_closed_order(
+            order_id="3",
+            pnl=3,
+            reward_risk=2.0,
+            impulse_atr=1.0,
+            pullback_volume=0.5,
+            confirmation_time="10:22",
+        ),
+    ]
+
+    report = build_webull_paper_analytics(
+        records=records,
+    )
+
+    first = next(
+        group
+        for group in report.by_confirmation_time
+        if group.key == "10:00-10:14 ET"
+    )
+
+    second = next(
+        group
+        for group in report.by_confirmation_time
+        if group.key == "10:15-10:29 ET"
+    )
+
+    assert first.closed_trades == 2
+    assert first.realized_pnl == 2
+    assert second.closed_trades == 1
+    assert second.realized_pnl == 3
+
+
+def test_legacy_metadata_is_reported_as_unavailable():
+    trade = closed_order(
+        order_id="1",
+        symbol="OPEN",
+        pnl=2,
+        return_pct=2,
+        reason="TARGET",
+        fill_hour=14,
+        fill_minute=1,
+        mfe=3,
+        mae=-1,
+    )
+
+    report = build_webull_paper_analytics(
+        records=[trade],
+    )
+
+    assert report.by_reward_risk[0].key == (
+        "UNAVAILABLE"
+    )
+    assert report.by_impulse_atr[0].key == (
+        "UNAVAILABLE"
+    )
+    assert report.by_pullback_volume[0].key == (
+        "UNAVAILABLE"
+    )
+    assert report.by_confirmation_time[0].key == (
+        "UNAVAILABLE"
+    )
+
+    assert (
+        report.by_reward_risk[0].realized_pnl
+        == 2
+    )
