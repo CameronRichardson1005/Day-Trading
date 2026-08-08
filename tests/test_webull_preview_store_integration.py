@@ -12,6 +12,8 @@ def ready_preview():
         "symbol": "OPEN",
         "quantity": 10,
         "limitBuy": 4.25,
+        "target": 4.60,
+        "tradingStopLoss": 4.10,
         "proposedExposure": 42.5,
     }
 

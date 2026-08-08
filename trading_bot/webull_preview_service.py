@@ -122,6 +122,10 @@ class WebullPreviewService:
                 "symbol": preview["symbol"],
                 "quantity": preview["quantity"],
                 "limitPrice": preview["limitBuy"],
+                "targetPrice": preview["target"],
+                "tradingStopPrice": (
+                    preview["tradingStopLoss"]
+                ),
                 "proposedExposure": (
                     preview["proposedExposure"]
                 ),

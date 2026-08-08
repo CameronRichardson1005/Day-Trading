@@ -48,7 +48,12 @@ class WebullPreviewStore:
             "createdAt",
         }
 
-        unknown = set(preview) - required
+        optional = {
+            "targetPrice",
+            "tradingStopPrice",
+        }
+
+        unknown = set(preview) - required - optional
 
         if unknown:
             raise WebullPreviewStoreError(
@@ -72,6 +77,24 @@ class WebullPreviewStore:
             limit_price = float(preview["limitPrice"])
             proposed_exposure = float(
                 preview["proposedExposure"]
+            )
+
+            raw_target_price = preview.get(
+                "targetPrice"
+            )
+            raw_stop_price = preview.get(
+                "tradingStopPrice"
+            )
+
+            target_price = (
+                None
+                if raw_target_price is None
+                else float(raw_target_price)
+            )
+            stop_price = (
+                None
+                if raw_stop_price is None
+                else float(raw_stop_price)
             )
         except (TypeError, ValueError) as error:
             raise WebullPreviewStoreError(
@@ -97,6 +120,33 @@ class WebullPreviewStore:
             raise WebullPreviewStoreError(
                 "Preview limit price must be positive."
             )
+
+        if (
+            (target_price is None)
+            != (stop_price is None)
+        ):
+            raise WebullPreviewStoreError(
+                "Preview target and trading stop must "
+                "either both be present or both be absent."
+            )
+
+        if target_price is not None:
+            if target_price <= limit_price:
+                raise WebullPreviewStoreError(
+                    "Preview target must be above "
+                    "the BUY limit price."
+                )
+
+            if stop_price <= 0:
+                raise WebullPreviewStoreError(
+                    "Preview trading stop must be positive."
+                )
+
+            if stop_price >= limit_price:
+                raise WebullPreviewStoreError(
+                    "Preview trading stop must be below "
+                    "the BUY limit price."
+                )
 
         expected_exposure = round(
             quantity * limit_price,
@@ -130,7 +180,7 @@ class WebullPreviewStore:
                 "Preview createdAt must include a timezone."
             )
 
-        return {
+        validated = {
             "symbol": symbol,
             "quantity": quantity,
             "limitPrice": round(limit_price, 4),
@@ -142,6 +192,21 @@ class WebullPreviewStore:
                 .replace("+00:00", "Z")
             ),
         }
+
+        # Legacy version-1 previews may not contain lifecycle
+        # prices. Preserve compatibility when reading them, while
+        # all newly generated previews include both fields.
+        if target_price is not None:
+            validated["targetPrice"] = round(
+                target_price,
+                4,
+            )
+            validated["tradingStopPrice"] = round(
+                stop_price,
+                4,
+            )
+
+        return validated
 
     def save_previews(
         self,

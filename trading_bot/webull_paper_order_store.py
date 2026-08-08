@@ -27,6 +27,12 @@ class WebullPaperOrderRecord:
     submitted_at: datetime
     safety_reason: str
 
+    # Local-paper lifecycle data. These fields never represent
+    # an order submitted to Webull.
+    target_price: float | None = None
+    stop_price: float | None = None
+    lifecycle_status: str = "ENTRY PENDING"
+
 
 class WebullPaperOrderStore:
     """
@@ -101,6 +107,9 @@ class WebullPaperOrderStore:
         side = record.side.strip().upper()
         status = record.status.strip().upper()
         safety_reason = record.safety_reason.strip()
+        lifecycle_status = (
+            record.lifecycle_status.strip().upper()
+        )
 
         if not paper_order_id:
             raise WebullPaperOrderStoreError(
@@ -161,6 +170,46 @@ class WebullPaperOrderStore:
                 "safety_reason is required."
             )
 
+        if lifecycle_status != "ENTRY PENDING":
+            raise WebullPaperOrderStoreError(
+                "New paper-order lifecycle status must be "
+                "ENTRY PENDING."
+            )
+
+        if (
+            (record.target_price is None)
+            != (record.stop_price is None)
+        ):
+            raise WebullPaperOrderStoreError(
+                "Paper-order target and stop must either "
+                "both be present or both be absent."
+            )
+
+        target_price = None
+        stop_price = None
+
+        if record.target_price is not None:
+            target_price = float(record.target_price)
+            stop_price = float(record.stop_price)
+
+            if target_price <= record.limit_price:
+                raise WebullPaperOrderStoreError(
+                    "Paper-order target must be above "
+                    "the BUY limit price."
+                )
+
+            if stop_price <= 0:
+                raise WebullPaperOrderStoreError(
+                    "Paper-order stop must be positive."
+                )
+
+            if stop_price >= record.limit_price:
+                raise WebullPaperOrderStoreError(
+                    "Paper-order stop must be below "
+                    "the BUY limit price."
+                )
+
+
         WebullPaperOrderStore._format_datetime(
             record.created_at
         )
@@ -186,6 +235,17 @@ class WebullPaperOrderStore:
             created_at=record.created_at.astimezone(UTC),
             submitted_at=record.submitted_at.astimezone(UTC),
             safety_reason=safety_reason,
+            target_price=(
+                None
+                if target_price is None
+                else round(target_price, 4)
+            ),
+            stop_price=(
+                None
+                if stop_price is None
+                else round(stop_price, 4)
+            ),
+            lifecycle_status=lifecycle_status,
         )
 
     @staticmethod
@@ -236,7 +296,13 @@ class WebullPaperOrderStore:
             "safety_reason",
         }
 
-        unknown = set(payload) - required
+        optional = {
+            "target_price",
+            "stop_price",
+            "lifecycle_status",
+        }
+
+        unknown = set(payload) - required - optional
         missing = required - set(payload)
 
         if unknown:
@@ -294,6 +360,22 @@ class WebullPaperOrderStore:
             ),
             safety_reason=str(
                 payload["safety_reason"]
+            ),
+            target_price=(
+                None
+                if payload.get("target_price") is None
+                else float(payload["target_price"])
+            ),
+            stop_price=(
+                None
+                if payload.get("stop_price") is None
+                else float(payload["stop_price"])
+            ),
+            lifecycle_status=str(
+                payload.get(
+                    "lifecycle_status",
+                    "ENTRY PENDING",
+                )
             ),
         )
 
