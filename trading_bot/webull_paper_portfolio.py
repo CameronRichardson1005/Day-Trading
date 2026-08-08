@@ -4,7 +4,7 @@ import math
 import os
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from .webull_paper_order_store import (
     WebullPaperOrderRecord,
@@ -396,3 +396,71 @@ def load_webull_paper_portfolio(
         latest_prices=latest_prices,
         starting_cash=starting_cash,
     )
+
+
+def latest_prices_from_completed_bars(
+    bars_by_symbol: dict[str, list[dict]],
+) -> dict[str, float]:
+    """
+    Return the latest valid completed-bar close for each symbol.
+
+    This function performs no market-data request. It only reads
+    bars already supplied by the Fibonacci intraday cache.
+    """
+    latest: dict[str, tuple[datetime, float]] = {}
+
+    for raw_symbol, bars in bars_by_symbol.items():
+        symbol = str(raw_symbol).strip().upper()
+
+        if not symbol:
+            continue
+
+        for bar in bars:
+            try:
+                timestamp = datetime.fromisoformat(
+                    str(bar["t"]).replace(
+                        "Z",
+                        "+00:00",
+                    )
+                )
+                close = float(bar["c"])
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as error:
+                raise WebullPaperPortfolioError(
+                    "INVALID_PORTFOLIO_MARK_BAR"
+                ) from error
+
+            if timestamp.tzinfo is None:
+                raise WebullPaperPortfolioError(
+                    "PORTFOLIO_MARK_TIMESTAMP_"
+                    "MUST_BE_TIMEZONE_AWARE"
+                )
+
+            if (
+                not math.isfinite(close)
+                or close <= 0
+            ):
+                raise WebullPaperPortfolioError(
+                    "INVALID_PORTFOLIO_MARK_PRICE"
+                )
+
+            timestamp = timestamp.astimezone(UTC)
+
+            existing = latest.get(symbol)
+
+            if (
+                existing is None
+                or timestamp > existing[0]
+            ):
+                latest[symbol] = (
+                    timestamp,
+                    close,
+                )
+
+    return {
+        symbol: round(value[1], 6)
+        for symbol, value in latest.items()
+    }

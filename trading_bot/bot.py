@@ -74,6 +74,11 @@ from .webull_paper_order_store import (
 from .webull_paper_performance import (
     load_webull_paper_daily_performance,
 )
+
+from .webull_paper_portfolio import (
+    latest_prices_from_completed_bars,
+    load_webull_paper_portfolio,
+)
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
@@ -4758,6 +4763,35 @@ class TradingBot:
                     f"MAE: {record.mae_pct:+.4f}%"
                 )
 
+    def _refresh_webull_paper_portfolio(
+            self,
+            *,
+            bars_by_symbol: dict[str, list[dict]],
+            store,
+    ):
+        """
+        Reconstruct and mark the LOCAL PAPER portfolio using only
+        already-cached completed Fibonacci bars.
+
+        No Alpaca request and no Webull broker action occurs here.
+        """
+        latest_prices = (
+            latest_prices_from_completed_bars(
+                bars_by_symbol
+            )
+        )
+
+        portfolio = load_webull_paper_portfolio(
+            latest_prices=latest_prices,
+            store=store,
+        )
+
+        self._webull_paper_portfolio_snapshot = (
+            portfolio
+        )
+
+        return portfolio
+
     def _process_webull_paper_lifecycle(
             self,
             *,
@@ -4792,6 +4826,11 @@ class TradingBot:
         self._print_webull_paper_lifecycle_changes(
             before=before,
             changed=changed,
+        )
+
+        self._refresh_webull_paper_portfolio(
+            bars_by_symbol=bars,
+            store=tracker.store,
         )
 
     def _finalize_webull_paper_lifecycle(
@@ -4835,6 +4874,11 @@ class TradingBot:
         self._print_webull_paper_lifecycle_changes(
             before=before,
             changed=changed,
+        )
+
+        self._refresh_webull_paper_portfolio(
+            bars_by_symbol=bars,
+            store=tracker.store,
         )
 
     def run_fibonacci_monitor(

@@ -444,3 +444,116 @@ def test_invalid_starting_cash_fails_closed(
         match="INVALID_PAPER_STARTING_CASH",
     ):
         configured_paper_starting_cash()
+
+
+def test_latest_prices_uses_latest_completed_bar():
+    from trading_bot.webull_paper_portfolio import (
+        latest_prices_from_completed_bars,
+    )
+
+    prices = latest_prices_from_completed_bars(
+        {
+            "open": [
+                {
+                    "t": "2026-08-07T14:01:00Z",
+                    "c": 10.10,
+                },
+                {
+                    "t": "2026-08-07T14:03:00Z",
+                    "c": 10.30,
+                },
+                {
+                    "t": "2026-08-07T14:02:00Z",
+                    "c": 10.20,
+                },
+            ]
+        }
+    )
+
+    assert prices == {
+        "OPEN": 10.30,
+    }
+
+
+def test_latest_prices_supports_multiple_symbols():
+    from trading_bot.webull_paper_portfolio import (
+        latest_prices_from_completed_bars,
+    )
+
+    prices = latest_prices_from_completed_bars(
+        {
+            "OPEN": [
+                {
+                    "t": "2026-08-07T14:01:00Z",
+                    "c": 4.25,
+                }
+            ],
+            "SOUN": [
+                {
+                    "t": "2026-08-07T14:01:00Z",
+                    "c": 6.50,
+                }
+            ],
+        }
+    )
+
+    assert prices == {
+        "OPEN": 4.25,
+        "SOUN": 6.50,
+    }
+
+
+def test_latest_prices_rejects_nonpositive_close():
+    from trading_bot.webull_paper_portfolio import (
+        latest_prices_from_completed_bars,
+    )
+
+    with pytest.raises(
+        WebullPaperPortfolioError,
+        match="INVALID_PORTFOLIO_MARK_PRICE",
+    ):
+        latest_prices_from_completed_bars(
+            {
+                "OPEN": [
+                    {
+                        "t": "2026-08-07T14:01:00Z",
+                        "c": 0,
+                    }
+                ]
+            }
+        )
+
+
+def test_latest_prices_requires_timezone():
+    from trading_bot.webull_paper_portfolio import (
+        latest_prices_from_completed_bars,
+    )
+
+    with pytest.raises(
+        WebullPaperPortfolioError,
+        match=(
+            "PORTFOLIO_MARK_TIMESTAMP_"
+            "MUST_BE_TIMEZONE_AWARE"
+        ),
+    ):
+        latest_prices_from_completed_bars(
+            {
+                "OPEN": [
+                    {
+                        "t": "2026-08-07T14:01:00",
+                        "c": 4.25,
+                    }
+                ]
+            }
+        )
+
+
+def test_latest_prices_empty_cache_is_empty():
+    from trading_bot.webull_paper_portfolio import (
+        latest_prices_from_completed_bars,
+    )
+
+    assert (
+        latest_prices_from_completed_bars({})
+        == {}
+    )
