@@ -811,3 +811,103 @@ def test_publish_passes_paper_performance_to_endpoint():
         calls[0][1]["json"]["paperPerformance"]
         == performance
     )
+
+
+def test_payload_includes_optional_paper_portfolio():
+    portfolio = {
+        "startingCash": 10000.0,
+        "cash": 9965.0,
+        "buyingPower": 9965.0,
+        "marketValue": 42.0,
+        "realizedPnl": 5.0,
+        "unrealizedPnl": 2.0,
+        "totalPnl": 7.0,
+        "equity": 10007.0,
+        "simulationOnly": True,
+        "brokerSubmitted": False,
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+        paper_portfolio=portfolio,
+    )
+
+    assert payload["paperPortfolio"] == portfolio
+
+
+def test_payload_omits_paper_portfolio_when_unavailable():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+    )
+
+    assert "paperPortfolio" not in payload
+
+
+def test_publish_passes_paper_portfolio_to_endpoint():
+    calls = []
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "accepted": True,
+                "id": "live_fibonacci-2026-08-07",
+                "status": "COMPLETE",
+            }
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    exporter = DashboardExporter(
+        url="https://example.test/api/sessions/latest",
+        ingest_key="secret",
+        site_token="site-token",
+        post_fn=post,
+    )
+
+    portfolio = {
+        "startingCash": 10000.0,
+        "cash": 10005.0,
+        "equity": 10007.0,
+        "simulationOnly": True,
+        "brokerSubmitted": False,
+    }
+
+    exporter.publish(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+        paper_portfolio=portfolio,
+    )
+
+    assert (
+        calls[0][1]["json"]["paperPortfolio"]
+        == portfolio
+    )
