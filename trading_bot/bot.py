@@ -74,6 +74,9 @@ from .webull_paper_order_store import (
 from .webull_paper_performance import (
     load_webull_paper_daily_performance,
 )
+from .webull_paper_analytics import (
+    load_webull_paper_analytics,
+)
 
 from .webull_paper_portfolio import (
     latest_prices_from_completed_bars,
@@ -4793,6 +4796,27 @@ class TradingBot:
         except Exception as error:
             print(
                 "LOCAL PAPER performance write failed. "
+                f"Reason: {error}"
+            )
+
+        try:
+            analytics_report = (
+                load_webull_paper_analytics()
+            )
+
+            self.sheets.write_paper_analytics(
+                date_str=date_str,
+                report=analytics_report,
+            )
+
+            print(
+                "LOCAL PAPER cumulative analytics written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "LOCAL PAPER analytics write failed. "
                 f"Reason: {error}"
             )
 

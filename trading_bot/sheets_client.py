@@ -978,6 +978,131 @@ class SheetsClient:
             sheet_name="Paper Performance",
         )
 
+    def write_paper_analytics(
+        self,
+        *,
+        date_str: str,
+        report,
+    ) -> None:
+        """
+        Store cumulative LOCAL PAPER analytics by dimension.
+
+        This worksheet contains simulated paper-trading analysis
+        only. It does not represent broker-submitted activity.
+        """
+        columns = [
+            "Date",
+            "Dimension",
+            "Group",
+            "Approved Orders",
+            "Entered Trades",
+            "Closed Trades",
+            "No Entry",
+            "Wins",
+            "Losses",
+            "Breakeven",
+            "Target Exits",
+            "Stop Exits",
+            "Time Exits",
+            "Win Rate %",
+            "Realized P&L",
+            "Average P&L / Trade",
+            "Average Return %",
+            "Expectancy / Trade",
+            "Average MFE %",
+            "Average MAE %",
+            "Sample Label",
+            "Simulation Only",
+            "Broker Submitted",
+        ]
+
+        dimensions = [
+            ("SYMBOL", report.by_symbol),
+            ("ENTRY TIME", report.by_entry_time),
+            ("REWARD/RISK", report.by_reward_risk),
+            ("IMPULSE ATR", report.by_impulse_atr),
+            (
+                "PULLBACK VOLUME",
+                report.by_pullback_volume,
+            ),
+            (
+                "CONFIRMATION TIME",
+                report.by_confirmation_time,
+            ),
+        ]
+
+        rows = []
+
+        for dimension, groups in dimensions:
+            for group in groups:
+                rows.append([
+                    date_str,
+                    dimension,
+                    group.key,
+                    group.approved_orders,
+                    group.entered_trades,
+                    group.closed_trades,
+                    group.no_entry,
+                    group.wins,
+                    group.losses,
+                    group.breakeven,
+                    group.target_exits,
+                    group.stop_exits,
+                    group.time_exits,
+                    (
+                        ""
+                        if group.win_rate_pct is None
+                        else group.win_rate_pct
+                    ),
+                    group.realized_pnl,
+                    (
+                        ""
+                        if group.average_pnl_per_trade
+                        is None
+                        else group.average_pnl_per_trade
+                    ),
+                    (
+                        ""
+                        if group.average_return_pct
+                        is None
+                        else group.average_return_pct
+                    ),
+                    (
+                        ""
+                        if group.expectancy_per_trade
+                        is None
+                        else group.expectancy_per_trade
+                    ),
+                    (
+                        ""
+                        if group.average_mfe_pct is None
+                        else group.average_mfe_pct
+                    ),
+                    (
+                        ""
+                        if group.average_mae_pct is None
+                        else group.average_mae_pct
+                    ),
+                    group.sample_label,
+                    "YES",
+                    "NO",
+                ])
+
+        worksheet = self.get_or_create_worksheet(
+            title="Paper Analytics",
+            rows=1000,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=rows,
+            last_column="W",
+            sheet_name="Paper Analytics",
+        )
+
     def write_paper_portfolio(
         self,
         *,

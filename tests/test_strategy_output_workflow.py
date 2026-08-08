@@ -102,9 +102,17 @@ def test_finalisation_is_separate(monkeypatch):
         ),
     )
 
+    monkeypatch.setattr(
+        "trading_bot.bot.load_webull_paper_analytics",
+        lambda **kwargs: SimpleNamespace(),
+    )
+
     bot.sheets = SimpleNamespace(
         write_paper_performance=lambda **kwargs: (
             events.append("paper-performance")
+        ),
+        write_paper_analytics=lambda **kwargs: (
+            events.append("paper-analytics")
         ),
         finalise_daily_workbook=lambda **kwargs: (
             events.append("finalise")
@@ -115,6 +123,7 @@ def test_finalisation_is_separate(monkeypatch):
 
     assert events == [
         "paper-performance",
+        "paper-analytics",
         "finalise",
     ]
 
