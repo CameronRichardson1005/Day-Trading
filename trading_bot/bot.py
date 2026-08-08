@@ -1024,6 +1024,141 @@ class TradingBot:
             )
             return []
 
+    def _dashboard_paper_portfolio(
+            self,
+            *,
+            source: str,
+    ) -> dict[str, object] | None:
+        """
+        Return the latest LOCAL PAPER portfolio snapshot for
+        live Fibonacci dashboard sessions.
+
+        This is reconstructed simulation state only and never
+        represents broker balances or broker-submitted positions.
+        """
+        if source.upper() not in {
+            "LIVE_FIBONACCI",
+            "LIVE_FIBONACCI_FINAL",
+        }:
+            return None
+
+        try:
+            portfolio = getattr(
+                self,
+                "_webull_paper_portfolio_snapshot",
+                None,
+            )
+
+            if portfolio is None:
+                tracker = getattr(
+                    self,
+                    "webull_paper_lifecycle_tracker",
+                    None,
+                )
+
+                portfolio = (
+                    load_webull_paper_portfolio(
+                        store=(
+                            tracker.store
+                            if tracker is not None
+                            else None
+                        ),
+                    )
+                )
+        except Exception as error:
+            print(
+                "LOCAL PAPER dashboard portfolio "
+                "unavailable. "
+                f"Reason: {error}"
+            )
+            return None
+
+        return {
+            "startingCash": portfolio.starting_cash,
+            "cash": portfolio.cash,
+            "buyingPower": portfolio.buying_power,
+            "openCostBasis": (
+                portfolio.open_cost_basis
+            ),
+            "marketValue": portfolio.market_value,
+            "realizedPnl": portfolio.realized_pnl,
+            "unrealizedPnl": portfolio.unrealized_pnl,
+            "totalPnl": portfolio.total_pnl,
+            "equity": portfolio.equity,
+            "openPositionCount": (
+                portfolio.open_position_count
+            ),
+            "closedPositionCount": (
+                portfolio.closed_position_count
+            ),
+            "pendingOrderCount": (
+                portfolio.pending_order_count
+            ),
+            "noEntryCount": portfolio.no_entry_count,
+            "overdrawn": portfolio.overdrawn,
+            "openPositions": [
+                {
+                    "paperOrderId": (
+                        position.paper_order_id
+                    ),
+                    "symbol": position.symbol,
+                    "quantity": position.quantity,
+                    "fillPrice": position.fill_price,
+                    "costBasis": position.cost_basis,
+                    "markPrice": position.mark_price,
+                    "markStatus": position.mark_status,
+                    "marketValue": (
+                        position.market_value
+                    ),
+                    "unrealizedPnl": (
+                        position.unrealized_pnl
+                    ),
+                    "unrealizedReturnPct": (
+                        position.unrealized_return_pct
+                    ),
+                    "filledAt": (
+                        position.filled_at
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    ),
+                    "targetPrice": (
+                        position.target_price
+                    ),
+                    "stopPrice": position.stop_price,
+                }
+                for position in portfolio.open_positions
+            ],
+            "closedPositions": [
+                {
+                    "paperOrderId": (
+                        position.paper_order_id
+                    ),
+                    "symbol": position.symbol,
+                    "quantity": position.quantity,
+                    "fillPrice": position.fill_price,
+                    "exitPrice": position.exit_price,
+                    "realizedPnl": (
+                        position.realized_pnl
+                    ),
+                    "returnPct": position.return_pct,
+                    "exitReason": position.exit_reason,
+                    "filledAt": (
+                        position.filled_at
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    ),
+                    "closedAt": (
+                        position.closed_at
+                        .isoformat()
+                        .replace("+00:00", "Z")
+                    ),
+                }
+                for position in portfolio.closed_positions
+            ],
+            "simulationOnly": True,
+            "brokerSubmitted": False,
+        }
+
     def _dashboard_paper_performance(
             self,
             *,
@@ -1127,6 +1262,11 @@ class TradingBot:
                 paper_performance=(
                     self._dashboard_paper_performance(
                         date_str=date_str,
+                        source=source,
+                    )
+                ),
+                paper_portfolio=(
+                    self._dashboard_paper_portfolio(
                         source=source,
                     )
                 ),
