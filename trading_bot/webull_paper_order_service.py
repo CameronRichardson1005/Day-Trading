@@ -263,6 +263,24 @@ class WebullPaperOrderService:
             created_at=submitted_at,
             submitted_at=submitted_at,
             safety_reason=safety.reason,
+            strategy_name=preview.get(
+                "strategyName"
+            ),
+            reward_risk=preview.get(
+                "rewardRisk"
+            ),
+            confirmation_time=preview.get(
+                "confirmationTime"
+            ),
+            retracement_price=preview.get(
+                "retracementPrice"
+            ),
+            impulse_atr_multiple=preview.get(
+                "impulseAtrMultiple"
+            ),
+            pullback_volume_ratio=preview.get(
+                "pullbackVolumeRatio"
+            ),
             target_price=target_price,
             stop_price=stop_price,
             lifecycle_status="ENTRY PENDING",

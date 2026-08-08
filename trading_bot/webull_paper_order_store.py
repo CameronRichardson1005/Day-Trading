@@ -27,6 +27,15 @@ class WebullPaperOrderRecord:
     submitted_at: datetime
     safety_reason: str
 
+    # Optional strategy snapshot captured when the LOCAL PAPER
+    # order was created. Legacy records may not contain these.
+    strategy_name: str | None = None
+    reward_risk: float | None = None
+    confirmation_time: str | None = None
+    retracement_price: float | None = None
+    impulse_atr_multiple: float | None = None
+    pullback_volume_ratio: float | None = None
+
     # Strategy prices required for local lifecycle tracking.
     target_price: float | None = None
     stop_price: float | None = None
@@ -142,6 +151,88 @@ class WebullPaperOrderStore:
             record.lifecycle_status.strip().upper()
         )
         exit_reason = record.exit_reason.strip().upper()
+
+        strategy_name = (
+            None
+            if record.strategy_name is None
+            else record.strategy_name.strip()
+        )
+        confirmation_time = (
+            None
+            if record.confirmation_time is None
+            else record.confirmation_time.strip()
+        )
+
+        if (
+            record.strategy_name is not None
+            and not strategy_name
+        ):
+            raise WebullPaperOrderStoreError(
+                "strategy_name cannot be empty."
+            )
+
+        if (
+            record.confirmation_time is not None
+            and not confirmation_time
+        ):
+            raise WebullPaperOrderStoreError(
+                "confirmation_time cannot be empty."
+            )
+
+        strategy_numbers = {}
+
+        for field_name, raw_value in {
+            "reward_risk": record.reward_risk,
+            "retracement_price": record.retracement_price,
+            "impulse_atr_multiple": record.impulse_atr_multiple,
+            "pullback_volume_ratio": record.pullback_volume_ratio,
+        }.items():
+            if raw_value is None:
+                strategy_numbers[field_name] = None
+                continue
+
+            value = float(raw_value)
+
+            if not (
+                float("-inf") < value < float("inf")
+            ):
+                raise WebullPaperOrderStoreError(
+                    f"{field_name} must be finite."
+                )
+
+            strategy_numbers[field_name] = value
+
+        if (
+            strategy_numbers["reward_risk"] is not None
+            and strategy_numbers["reward_risk"] <= 0
+        ):
+            raise WebullPaperOrderStoreError(
+                "reward_risk must be positive."
+            )
+
+        if (
+            strategy_numbers["retracement_price"] is not None
+            and strategy_numbers["retracement_price"] <= 0
+        ):
+            raise WebullPaperOrderStoreError(
+                "retracement_price must be positive."
+            )
+
+        if (
+            strategy_numbers["impulse_atr_multiple"] is not None
+            and strategy_numbers["impulse_atr_multiple"] < 0
+        ):
+            raise WebullPaperOrderStoreError(
+                "impulse_atr_multiple cannot be negative."
+            )
+
+        if (
+            strategy_numbers["pullback_volume_ratio"] is not None
+            and strategy_numbers["pullback_volume_ratio"] < 0
+        ):
+            raise WebullPaperOrderStoreError(
+                "pullback_volume_ratio cannot be negative."
+            )
 
         if not paper_order_id:
             raise WebullPaperOrderStoreError(
@@ -559,6 +650,40 @@ class WebullPaperOrderStore:
             created_at=created_at,
             submitted_at=submitted_at,
             safety_reason=safety_reason,
+            strategy_name=strategy_name,
+            reward_risk=(
+                None
+                if strategy_numbers["reward_risk"] is None
+                else round(
+                    strategy_numbers["reward_risk"],
+                    6,
+                )
+            ),
+            confirmation_time=confirmation_time,
+            retracement_price=(
+                None
+                if strategy_numbers["retracement_price"] is None
+                else round(
+                    strategy_numbers["retracement_price"],
+                    6,
+                )
+            ),
+            impulse_atr_multiple=(
+                None
+                if strategy_numbers["impulse_atr_multiple"] is None
+                else round(
+                    strategy_numbers["impulse_atr_multiple"],
+                    6,
+                )
+            ),
+            pullback_volume_ratio=(
+                None
+                if strategy_numbers["pullback_volume_ratio"] is None
+                else round(
+                    strategy_numbers["pullback_volume_ratio"],
+                    6,
+                )
+            ),
             target_price=target_price,
             stop_price=stop_price,
             lifecycle_status=lifecycle_status,
@@ -641,6 +766,12 @@ class WebullPaperOrderStore:
         optional = {
             "target_price",
             "stop_price",
+            "strategy_name",
+            "reward_risk",
+            "confirmation_time",
+            "retracement_price",
+            "impulse_atr_multiple",
+            "pullback_volume_ratio",
             "lifecycle_status",
             "filled_at",
             "fill_price",
@@ -726,6 +857,28 @@ class WebullPaperOrderStore:
             ),
             safety_reason=str(
                 payload["safety_reason"]
+            ),
+            strategy_name=(
+                None
+                if payload.get("strategy_name") is None
+                else str(payload["strategy_name"])
+            ),
+            reward_risk=optional_float(
+                "reward_risk"
+            ),
+            confirmation_time=(
+                None
+                if payload.get("confirmation_time") is None
+                else str(payload["confirmation_time"])
+            ),
+            retracement_price=optional_float(
+                "retracement_price"
+            ),
+            impulse_atr_multiple=optional_float(
+                "impulse_atr_multiple"
+            ),
+            pullback_volume_ratio=optional_float(
+                "pullback_volume_ratio"
             ),
             target_price=optional_float(
                 "target_price"
