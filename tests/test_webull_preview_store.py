@@ -15,6 +15,8 @@ def preview():
         "symbol": "OPEN",
         "quantity": 10,
         "limitPrice": 4.25,
+        "targetPrice": 4.60,
+        "tradingStopPrice": 4.10,
         "proposedExposure": 42.5,
         "status": "PREVIEW READY",
         "createdAt": datetime(
@@ -100,6 +102,8 @@ def test_file_contains_only_redacted_fields(
         "symbol",
         "quantity",
         "limitPrice",
+        "targetPrice",
+        "tradingStopPrice",
         "proposedExposure",
         "status",
         "createdAt",

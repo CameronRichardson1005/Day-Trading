@@ -63,6 +63,8 @@ def build_service(tmp_path):
             "symbol": "OPEN",
             "quantity": 10,
             "limitPrice": 4.25,
+            "targetPrice": 4.60,
+            "tradingStopPrice": 4.10,
             "proposedExposure": 42.50,
             "status": "PREVIEW READY",
             "createdAt": (
@@ -188,6 +190,8 @@ def test_unapproved_ticket_is_rejected(tmp_path):
             "symbol": "OPEN",
             "quantity": 10,
             "limitPrice": 4.25,
+            "targetPrice": 4.60,
+            "tradingStopPrice": 4.10,
             "proposedExposure": 42.50,
             "status": "PREVIEW READY",
             "createdAt": (
@@ -242,6 +246,8 @@ def test_changed_preview_is_rejected(tmp_path):
             "symbol": "OPEN",
             "quantity": 11,
             "limitPrice": 4.25,
+            "targetPrice": 4.60,
+            "tradingStopPrice": 4.10,
             "proposedExposure": 46.75,
             "status": "PREVIEW READY",
             "createdAt": (
@@ -405,3 +411,34 @@ def test_post_write_failure_keeps_approval_consumed(
         "CONSUMED"
     )
     assert len(store.records) == 1
+
+
+def test_missing_lifecycle_data_is_rejected(
+    tmp_path,
+):
+    service, _, ticket, _, _ = (
+        build_service(tmp_path)
+    )
+
+    service.preview_store.save_previews([
+        {
+            "symbol": "OPEN",
+            "quantity": 10,
+            "limitPrice": 4.25,
+            "proposedExposure": 42.50,
+            "status": "PREVIEW READY",
+            "createdAt": (
+                "2026-08-06T20:00:00Z"
+            ),
+        }
+    ])
+
+    with pytest.raises(
+        WebullPaperOrderServiceError,
+        match="PREVIEW_LIFECYCLE_DATA_MISSING",
+    ):
+        service.submit_paper_order(
+            symbol="OPEN",
+            approval_id=ticket.approval_id,
+            approval_token=ticket.approval_token,
+        )

@@ -141,6 +141,21 @@ class WebullPaperOrderService:
             manually_approved=False,
         )
 
+        if (
+            preview.get("targetPrice") is None
+            or preview.get("tradingStopPrice") is None
+        ):
+            raise WebullPaperOrderServiceError(
+                "PREVIEW_LIFECYCLE_DATA_MISSING"
+            )
+
+        target_price = float(
+            preview["targetPrice"]
+        )
+        stop_price = float(
+            preview["tradingStopPrice"]
+        )
+
         stored_exposure = round(
             float(preview["proposedExposure"]),
             2,
@@ -222,6 +237,9 @@ class WebullPaperOrderService:
             created_at=submitted_at,
             submitted_at=submitted_at,
             safety_reason=safety.reason,
+            target_price=target_price,
+            stop_price=stop_price,
+            lifecycle_status="ENTRY PENDING",
         )
 
         try:
