@@ -22,6 +22,22 @@ def portfolio():
     )
 
 
+def risk_status(
+    *,
+    trading_allowed=True,
+    reason="PAPER_TRADING_ALLOWED",
+):
+    return SimpleNamespace(
+        trading_allowed=trading_allowed,
+        reason=reason,
+        available_for_new_orders=9_850.0,
+        pending_reserved_cash=115.0,
+        daily_realized_pnl=-10.0,
+        max_daily_loss=50.0,
+        remaining_daily_loss=40.0,
+    )
+
+
 def test_write_paper_portfolio_uses_dedicated_sheet():
     client = object.__new__(SheetsClient)
 
@@ -63,13 +79,14 @@ def test_write_paper_portfolio_uses_dedicated_sheet():
     client.write_paper_portfolio(
         date_str="2026-08-07",
         portfolio=portfolio(),
+        risk_status=risk_status(),
     )
 
     assert seen["title"] == "Paper Portfolio"
     assert seen["sheet_name"] == "Paper Portfolio"
     assert seen["date_str"] == "2026-08-07"
-    assert seen["last_column"] == "Q"
-    assert len(seen["columns"]) == 17
+    assert seen["last_column"] == "X"
+    assert len(seen["columns"]) == 24
 
     row = seen["rows_data"][0]
 
@@ -88,11 +105,20 @@ def test_write_paper_portfolio_uses_dedicated_sheet():
     assert row[12] == 1
     assert row[13] == 1
     assert row[14] == "NO"
+
     assert row[15] == "YES"
-    assert row[16] == "NO"
+    assert row[16] == "PAPER_TRADING_ALLOWED"
+    assert row[17] == 9_850.0
+    assert row[18] == 115.0
+    assert row[19] == -10.0
+    assert row[20] == 50.0
+    assert row[21] == 40.0
+
+    assert row[22] == "YES"
+    assert row[23] == "NO"
 
 
-def test_write_paper_portfolio_marks_overdrawn():
+def test_write_paper_portfolio_marks_risk_halt():
     client = object.__new__(SheetsClient)
 
     worksheet = object()
@@ -101,22 +127,51 @@ def test_write_paper_portfolio_marks_overdrawn():
     client.get_or_create_worksheet = (
         lambda **kwargs: worksheet
     )
-
-    def replace_date_rows(**kwargs):
-        seen.update(kwargs)
-
-    client._replace_date_rows = replace_date_rows
-
-    report = portfolio()
-    report.overdrawn = True
+    client._replace_date_rows = (
+        lambda **kwargs: seen.update(kwargs)
+    )
 
     client.write_paper_portfolio(
         date_str="2026-08-07",
-        portfolio=report,
+        portfolio=portfolio(),
+        risk_status=risk_status(
+            trading_allowed=False,
+            reason="PAPER_DAILY_LOSS_LIMIT_REACHED",
+        ),
     )
 
     row = seen["replacement_rows"][0]
 
-    assert row[14] == "YES"
-    assert row[15] == "YES"
-    assert row[16] == "NO"
+    assert row[15] == "NO"
+    assert row[16] == (
+        "PAPER_DAILY_LOSS_LIMIT_REACHED"
+    )
+    assert row[22] == "YES"
+    assert row[23] == "NO"
+
+
+def test_write_paper_portfolio_handles_missing_risk_status():
+    client = object.__new__(SheetsClient)
+
+    worksheet = object()
+    seen = {}
+
+    client.get_or_create_worksheet = (
+        lambda **kwargs: worksheet
+    )
+    client._replace_date_rows = (
+        lambda **kwargs: seen.update(kwargs)
+    )
+
+    client.write_paper_portfolio(
+        date_str="2026-08-07",
+        portfolio=portfolio(),
+        risk_status=None,
+    )
+
+    row = seen["replacement_rows"][0]
+
+    assert row[15] == "UNKNOWN"
+    assert row[16] == "RISK STATUS UNAVAILABLE"
+    assert row[22] == "YES"
+    assert row[23] == "NO"

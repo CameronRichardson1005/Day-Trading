@@ -4,11 +4,12 @@ import math
 import os
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from .webull_paper_order_store import (
     WebullPaperOrderRecord,
+    WebullPaperOrderStore,
 )
 from .webull_paper_portfolio import (
     build_webull_paper_portfolio,
@@ -354,4 +355,50 @@ def build_webull_paper_risk_status(
         daily_realized_pnl=daily_realized_pnl,
         max_daily_loss=round(float(max_daily_loss), 2),
         remaining_daily_loss=remaining_daily_loss,
+    )
+
+
+
+def load_webull_paper_risk_status(
+    *,
+    date_str: str,
+    store: WebullPaperOrderStore | None = None,
+    starting_cash: float | None = None,
+    max_daily_loss: float | None = None,
+) -> WebullPaperRiskStatus:
+    """
+    Reconstruct read-only LOCAL PAPER risk status for one
+    New York trading date from the durable paper-order ledger.
+    """
+    try:
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+    except ValueError as error:
+        raise WebullPaperRiskError(
+            "INVALID_PAPER_RISK_DATE"
+        ) from error
+
+    eastern = ZoneInfo("America/New_York")
+
+    evaluation_time = datetime.combine(
+        trading_date,
+        time(hour=16),
+        tzinfo=eastern,
+    )
+
+    effective_store = (
+        store or WebullPaperOrderStore()
+    )
+
+    records = list(
+        effective_store.load().values()
+    )
+
+    return build_webull_paper_risk_status(
+        records=records,
+        now=evaluation_time,
+        starting_cash=starting_cash,
+        max_daily_loss=max_daily_loss,
     )
