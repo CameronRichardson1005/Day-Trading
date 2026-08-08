@@ -85,6 +85,7 @@ def test_dashboard_portfolio_only_for_live_fibonacci():
 
     assert (
         bot._dashboard_paper_portfolio(
+            date_str="2026-08-07",
             source="REPLAY",
         )
         is None
@@ -92,6 +93,7 @@ def test_dashboard_portfolio_only_for_live_fibonacci():
 
     assert (
         bot._dashboard_paper_portfolio(
+            date_str="2026-08-07",
             source="LIVE_MANIPULATION",
         )
         is None
@@ -105,6 +107,7 @@ def test_dashboard_portfolio_contains_account_state():
     )
 
     result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
         source="LIVE_FIBONACCI",
     )
 
@@ -136,6 +139,7 @@ def test_final_dashboard_uses_same_portfolio_shape():
     )
 
     result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
         source="LIVE_FIBONACCI_FINAL",
     )
 
@@ -170,6 +174,7 @@ def test_dashboard_portfolio_reconstructs_if_snapshot_missing(
     )
 
     result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
         source="LIVE_FIBONACCI",
     )
 
@@ -194,7 +199,96 @@ def test_dashboard_portfolio_failure_is_nonfatal(
     )
 
     result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
         source="LIVE_FIBONACCI",
     )
 
     assert result is None
+
+
+def test_dashboard_portfolio_includes_risk_status(
+    monkeypatch,
+):
+    bot = object.__new__(TradingBot)
+    bot._webull_paper_portfolio_snapshot = (
+        make_portfolio()
+    )
+
+    store = object()
+    bot.webull_paper_lifecycle_tracker = (
+        SimpleNamespace(store=store)
+    )
+
+    seen = {}
+
+    def load_risk(*, date_str, store):
+        seen["date_str"] = date_str
+        seen["store"] = store
+
+        return SimpleNamespace(
+            trading_allowed=False,
+            reason="PAPER_DAILY_LOSS_LIMIT_REACHED",
+            available_for_new_orders=9_950.0,
+            pending_reserved_cash=0.0,
+            daily_realized_pnl=-50.0,
+            max_daily_loss=50.0,
+            remaining_daily_loss=0.0,
+        )
+
+    monkeypatch.setattr(
+        bot_module,
+        "load_webull_paper_risk_status",
+        load_risk,
+    )
+
+    result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+    )
+
+    assert seen["date_str"] == "2026-08-07"
+    assert seen["store"] is store
+
+    assert result["risk"] == {
+        "tradingAllowed": False,
+        "reason": "PAPER_DAILY_LOSS_LIMIT_REACHED",
+        "availableForNewOrders": 9_950.0,
+        "pendingReservedCash": 0.0,
+        "dailyRealizedPnl": -50.0,
+        "maxDailyLoss": 50.0,
+        "remainingDailyLoss": 0.0,
+        "simulationOnly": True,
+        "brokerSubmitted": False,
+    }
+
+
+def test_dashboard_risk_failure_is_nonfatal(
+    monkeypatch,
+):
+    bot = object.__new__(TradingBot)
+    bot._webull_paper_portfolio_snapshot = (
+        make_portfolio()
+    )
+
+    bot.webull_paper_lifecycle_tracker = (
+        SimpleNamespace(store=object())
+    )
+
+    def fail(**kwargs):
+        raise RuntimeError("risk unavailable")
+
+    monkeypatch.setattr(
+        bot_module,
+        "load_webull_paper_risk_status",
+        fail,
+    )
+
+    result = bot._dashboard_paper_portfolio(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+    )
+
+    assert result is not None
+    assert result["risk"] is None
+    assert result["simulationOnly"] is True
+    assert result["brokerSubmitted"] is False

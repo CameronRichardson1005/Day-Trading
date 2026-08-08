@@ -983,6 +983,7 @@ class SheetsClient:
         *,
         date_str: str,
         portfolio,
+        risk_status=None,
     ) -> None:
         """
         Store one LOCAL PAPER portfolio snapshot.
@@ -1007,6 +1008,13 @@ class SheetsClient:
             "Pending Orders",
             "No Entry",
             "Overdrawn",
+            "Trading Allowed",
+            "Risk Reason",
+            "Available for New Orders",
+            "Pending Reserved Cash",
+            "Daily Realized P&L",
+            "Daily Loss Limit",
+            "Remaining Daily Loss",
             "Simulation Only",
             "Broker Submitted",
         ]
@@ -1031,6 +1039,45 @@ class SheetsClient:
                 if portfolio.overdrawn
                 else "NO"
             ),
+            (
+                "UNKNOWN"
+                if risk_status is None
+                else (
+                    "YES"
+                    if risk_status.trading_allowed
+                    else "NO"
+                )
+            ),
+            (
+                "RISK STATUS UNAVAILABLE"
+                if risk_status is None
+                else risk_status.reason
+            ),
+            (
+                ""
+                if risk_status is None
+                else risk_status.available_for_new_orders
+            ),
+            (
+                ""
+                if risk_status is None
+                else risk_status.pending_reserved_cash
+            ),
+            (
+                ""
+                if risk_status is None
+                else risk_status.daily_realized_pnl
+            ),
+            (
+                ""
+                if risk_status is None
+                else risk_status.max_daily_loss
+            ),
+            (
+                ""
+                if risk_status is None
+                else risk_status.remaining_daily_loss
+            ),
             "YES",
             "NO",
         ]
@@ -1046,7 +1093,7 @@ class SheetsClient:
             columns=columns,
             date_str=date_str,
             replacement_rows=[row],
-            last_column="Q",
+            last_column="X",
             sheet_name="Paper Portfolio",
         )
 

@@ -79,6 +79,9 @@ from .webull_paper_portfolio import (
     latest_prices_from_completed_bars,
     load_webull_paper_portfolio,
 )
+from .webull_paper_risk import (
+    load_webull_paper_risk_status,
+)
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
@@ -1027,6 +1030,7 @@ class TradingBot:
     def _dashboard_paper_portfolio(
             self,
             *,
+            date_str: str,
             source: str,
     ) -> dict[str, object] | None:
         """
@@ -1043,6 +1047,18 @@ class TradingBot:
             return None
 
         try:
+            tracker = getattr(
+                self,
+                "webull_paper_lifecycle_tracker",
+                None,
+            )
+
+            portfolio_store = (
+                tracker.store
+                if tracker is not None
+                else None
+            )
+
             portfolio = getattr(
                 self,
                 "_webull_paper_portfolio_snapshot",
@@ -1050,20 +1066,25 @@ class TradingBot:
             )
 
             if portfolio is None:
-                tracker = getattr(
-                    self,
-                    "webull_paper_lifecycle_tracker",
-                    None,
-                )
-
                 portfolio = (
                     load_webull_paper_portfolio(
-                        store=(
-                            tracker.store
-                            if tracker is not None
-                            else None
-                        ),
+                        store=portfolio_store,
                     )
+                )
+
+            try:
+                risk_status = (
+                    load_webull_paper_risk_status(
+                        date_str=date_str,
+                        store=portfolio_store,
+                    )
+                )
+            except Exception as error:
+                risk_status = None
+                print(
+                    "LOCAL PAPER dashboard risk status "
+                    "unavailable. "
+                    f"Reason: {error}"
                 )
         except Exception as error:
             print(
@@ -1155,6 +1176,33 @@ class TradingBot:
                 }
                 for position in portfolio.closed_positions
             ],
+            "risk": (
+                None
+                if risk_status is None
+                else {
+                    "tradingAllowed": (
+                        risk_status.trading_allowed
+                    ),
+                    "reason": risk_status.reason,
+                    "availableForNewOrders": (
+                        risk_status.available_for_new_orders
+                    ),
+                    "pendingReservedCash": (
+                        risk_status.pending_reserved_cash
+                    ),
+                    "dailyRealizedPnl": (
+                        risk_status.daily_realized_pnl
+                    ),
+                    "maxDailyLoss": (
+                        risk_status.max_daily_loss
+                    ),
+                    "remainingDailyLoss": (
+                        risk_status.remaining_daily_loss
+                    ),
+                    "simulationOnly": True,
+                    "brokerSubmitted": False,
+                }
+            ),
             "simulationOnly": True,
             "brokerSubmitted": False,
         }
@@ -1267,6 +1315,7 @@ class TradingBot:
                 ),
                 paper_portfolio=(
                     self._dashboard_paper_portfolio(
+                        date_str=date_str,
                         source=source,
                     )
                 ),
@@ -4669,9 +4718,25 @@ class TradingBot:
                     )
                 )
 
+            try:
+                risk_status = (
+                    load_webull_paper_risk_status(
+                        date_str=date_str,
+                        store=portfolio_store,
+                    )
+                )
+            except Exception as error:
+                risk_status = None
+                print(
+                    "LOCAL PAPER risk status unavailable "
+                    "for Google Sheets. "
+                    f"Reason: {error}"
+                )
+
             self.sheets.write_paper_portfolio(
                 date_str=date_str,
                 portfolio=portfolio,
+                risk_status=risk_status,
             )
 
             print(
