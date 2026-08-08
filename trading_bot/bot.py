@@ -4414,6 +4414,43 @@ class TradingBot:
             approval_token=approval_token,
         )
 
+    @staticmethod
+    def _paper_trade_failure_message(
+            error: Exception,
+    ) -> str:
+        """
+        Convert LOCAL PAPER risk failures into clear operator
+        messages without exposing approval credentials or changing
+        any broker-submission behavior.
+        """
+        reason = str(error).strip()
+
+        messages = {
+            "PAPER_INSUFFICIENT_AVAILABLE_CASH": (
+                "BLOCKED BY PAPER RISK · insufficient "
+                "simulated cash available for this order"
+            ),
+            "PAPER_DAILY_LOSS_LIMIT_REACHED": (
+                "BLOCKED BY PAPER RISK · daily realized-loss "
+                "limit has been reached"
+            ),
+            "PAPER_NO_AVAILABLE_CASH": (
+                "BLOCKED BY PAPER RISK · no simulated cash "
+                "is available for new orders"
+            ),
+        }
+
+        if reason in messages:
+            return messages[reason]
+
+        if reason.startswith("PAPER_RISK_CHECK_FAILED:"):
+            return (
+                "BLOCKED BY PAPER RISK · local paper risk "
+                "status could not be verified safely"
+            )
+
+        return f"LOCAL PAPER trade failed · {reason}"
+
     def process_webull_paper_confirmations(
             self,
             *,
@@ -4500,8 +4537,11 @@ class TradingBot:
 
             except Exception as error:
                 print(
-                    f"{symbol}: LOCAL PAPER trade failed · "
-                    f"{error}"
+                    f"{symbol}: "
+                    f"{self._paper_trade_failure_message(error)}"
+                )
+                print(
+                    "NO WEBULL BROKER ORDER WAS SUBMITTED"
                 )
                 continue
 

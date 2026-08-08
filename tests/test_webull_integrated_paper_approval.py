@@ -134,3 +134,125 @@ def test_integrated_paper_confirmation_skips_failed_preview():
     )
 
     assert records == []
+
+
+def test_integrated_confirmation_explains_cash_risk_block(
+    capsys,
+):
+    bot = object.__new__(TradingBot)
+
+    ticket = WebullApprovalTicket(
+        approval_id="approval-1",
+        approval_token="secret-token",
+        symbol="OPEN",
+        quantity=25,
+        limit_price=4.25,
+        proposed_exposure=106.25,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC),
+    )
+
+    bot.request_webull_approval = (
+        lambda symbol: ticket
+    )
+    bot.confirm_webull_approval = (
+        lambda **kwargs: "APPROVED"
+    )
+
+    def blocked(**kwargs):
+        raise RuntimeError(
+            "PAPER_INSUFFICIENT_AVAILABLE_CASH"
+        )
+
+    bot.submit_webull_paper_order = blocked
+
+    records = bot.process_webull_paper_confirmations(
+        preview_results=[ready_preview()],
+        input_fn=lambda prompt: "y",
+    )
+
+    output = capsys.readouterr().out
+
+    assert records == []
+    assert (
+        "OPEN: BLOCKED BY PAPER RISK · insufficient "
+        "simulated cash available for this order"
+        in output
+    )
+    assert (
+        "NO WEBULL BROKER ORDER WAS SUBMITTED"
+        in output
+    )
+
+
+def test_integrated_confirmation_explains_daily_loss_halt(
+    capsys,
+):
+    bot = object.__new__(TradingBot)
+
+    ticket = WebullApprovalTicket(
+        approval_id="approval-1",
+        approval_token="secret-token",
+        symbol="OPEN",
+        quantity=25,
+        limit_price=4.25,
+        proposed_exposure=106.25,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC),
+    )
+
+    bot.request_webull_approval = (
+        lambda symbol: ticket
+    )
+    bot.confirm_webull_approval = (
+        lambda **kwargs: "APPROVED"
+    )
+
+    def blocked(**kwargs):
+        raise RuntimeError(
+            "PAPER_DAILY_LOSS_LIMIT_REACHED"
+        )
+
+    bot.submit_webull_paper_order = blocked
+
+    records = bot.process_webull_paper_confirmations(
+        preview_results=[ready_preview()],
+        input_fn=lambda prompt: "y",
+    )
+
+    output = capsys.readouterr().out
+
+    assert records == []
+    assert (
+        "OPEN: BLOCKED BY PAPER RISK · daily "
+        "realized-loss limit has been reached"
+        in output
+    )
+    assert (
+        "NO WEBULL BROKER ORDER WAS SUBMITTED"
+        in output
+    )
+
+
+def test_paper_trade_failure_message_fails_closed():
+    message = TradingBot._paper_trade_failure_message(
+        RuntimeError(
+            "PAPER_RISK_CHECK_FAILED:"
+            "INVALID_PAPER_MAX_DAILY_LOSS"
+        )
+    )
+
+    assert message == (
+        "BLOCKED BY PAPER RISK · local paper risk "
+        "status could not be verified safely"
+    )
+
+
+def test_paper_trade_failure_message_preserves_other_errors():
+    message = TradingBot._paper_trade_failure_message(
+        RuntimeError("PREVIEW_NOT_FOUND")
+    )
+
+    assert message == (
+        "LOCAL PAPER trade failed · PREVIEW_NOT_FOUND"
+    )
