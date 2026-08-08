@@ -106,6 +106,11 @@ class TradingBot:
         self.tracker = None
         self.dashboard = DashboardExporter()
 
+        # Static Fibonacci data is cached per session so the
+        # live monitor does not repeatedly request the same
+        # opening bars and ATR history from Alpaca.
+        self._fibonacci_session_static_cache = {}
+
         try:
             self.webull_approval_queue = (
                 WebullApprovalQueue(
@@ -3408,6 +3413,71 @@ class TradingBot:
                     f"evaluation failed: {error}"
                 )
 
+    def _get_fibonacci_session_static_data(
+            self,
+            *,
+            date_str: str,
+            data_feed: str,
+    ) -> tuple[
+        dict[str, dict | None],
+        dict[str, float | None],
+    ]:
+        """
+        Return Fibonacci inputs that remain fixed for a session.
+
+        Opening 09:30-09:45 bars and prior-day ATR values do not
+        change during the live Fibonacci monitoring window, so
+        repeated Alpaca requests are avoided after the first load.
+
+        The cache is isolated by trading date, market-data feed,
+        and the exact selected symbol set.
+        """
+        cache = getattr(
+            self,
+            "_fibonacci_session_static_cache",
+            None,
+        )
+
+        if cache is None:
+            cache = {}
+            self._fibonacci_session_static_cache = cache
+
+        cache_key = (
+            date_str,
+            data_feed.strip().lower(),
+            self.symbols_csv,
+        )
+
+        cached = cache.get(cache_key)
+
+        if cached is not None:
+            return cached
+
+        opening_bars = (
+            self.alpaca.get_opening_15min_bars(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        result = (
+            opening_bars,
+            atrs,
+        )
+
+        cache[cache_key] = result
+
+        return result
+
     def _calculate_fibonacci_strategy(
             self,
             date_str: str,
@@ -3468,16 +3538,11 @@ class TradingBot:
                 now_eastern,
             )
 
-        opening_bars = self.alpaca.get_opening_15min_bars(
-            symbols_csv=self.symbols_csv,
-            date_str=date_str,
-            feed=data_feed,
-        )
-
-        atrs = self.alpaca.get_previous_day_ranges_all(
-            symbols_csv=self.symbols_csv,
-            date_str=date_str,
-            feed=data_feed,
+        opening_bars, atrs = (
+            self._get_fibonacci_session_static_data(
+                date_str=date_str,
+                data_feed=data_feed,
+            )
         )
 
         if evaluation_end_eastern <= session_start:
