@@ -4545,6 +4545,195 @@ class TradingBot:
         )
         print("PAPER ANALYSIS ONLY — NOT SUBMITTED")
 
+    def _cached_fibonacci_bars_for_lifecycle(
+            self,
+            *,
+            date_str: str,
+            evaluation_end: datetime,
+            data_feed: str,
+    ) -> dict[str, list[dict]]:
+        """
+        Return already-fetched Fibonacci bars for local paper
+        lifecycle tracking without making another Alpaca request.
+        """
+        cache = getattr(
+            self,
+            "_fibonacci_intraday_bar_cache",
+            {},
+        )
+
+        cache_key = (
+            date_str,
+            data_feed.strip().lower(),
+            self.symbols_csv,
+        )
+
+        entry = cache.get(cache_key)
+
+        if not entry:
+            return {}
+
+        utc = ZoneInfo("UTC")
+        end_iso = evaluation_end.astimezone(
+            utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        return {
+            symbol: [
+                bar
+                for bar in entry["bars"].get(
+                    symbol,
+                    [],
+                )
+                if str(bar["t"]) < end_iso
+            ]
+            for symbol in self.stocks
+        }
+
+    @staticmethod
+    def _print_webull_paper_lifecycle_changes(
+            *,
+            before: dict,
+            changed: list[WebullPaperOrderRecord],
+    ) -> None:
+        for record in changed:
+            previous = before.get(
+                record.paper_order_id
+            )
+
+            previous_status = (
+                previous.lifecycle_status
+                if previous is not None
+                else None
+            )
+
+            if (
+                record.lifecycle_status
+                == previous_status
+            ):
+                continue
+
+            print()
+
+            if record.lifecycle_status == "OPEN":
+                print(
+                    f"{record.symbol}: LOCAL PAPER FILLED"
+                )
+                print(
+                    f"{record.quantity} shares @ "
+                    f"${record.fill_price:.4f}"
+                )
+                continue
+
+            if record.lifecycle_status == "CLOSED":
+                print(
+                    f"{record.symbol}: LOCAL PAPER CLOSED"
+                )
+                print(
+                    f"Reason: {record.exit_reason}"
+                )
+
+                if record.exit_price is None:
+                    print(
+                        "No simulated entry occurred."
+                    )
+                    continue
+
+                print(
+                    f"Exit: ${record.exit_price:.4f}"
+                )
+                print(
+                    f"P&L: ${record.realized_pnl:+.2f}"
+                )
+                print(
+                    f"Return: {record.return_pct:+.4f}%"
+                )
+                print(
+                    f"MFE: {record.mfe_pct:+.4f}%"
+                )
+                print(
+                    f"MAE: {record.mae_pct:+.4f}%"
+                )
+
+    def _process_webull_paper_lifecycle(
+            self,
+            *,
+            date_str: str,
+            evaluation_end: datetime,
+            data_feed: str,
+    ) -> None:
+        tracker = getattr(
+            self,
+            "webull_paper_lifecycle_tracker",
+            None,
+        )
+
+        if tracker is None:
+            return
+
+        bars = self._cached_fibonacci_bars_for_lifecycle(
+            date_str=date_str,
+            evaluation_end=evaluation_end,
+            data_feed=data_feed,
+        )
+
+        if not bars:
+            return
+
+        before = tracker.store.load()
+
+        changed = tracker.process_bars(
+            bars_by_symbol=bars,
+        )
+
+        self._print_webull_paper_lifecycle_changes(
+            before=before,
+            changed=changed,
+        )
+
+    def _finalize_webull_paper_lifecycle(
+            self,
+            *,
+            date_str: str,
+            cutoff: datetime,
+            data_feed: str,
+    ) -> None:
+        tracker = getattr(
+            self,
+            "webull_paper_lifecycle_tracker",
+            None,
+        )
+
+        if tracker is None:
+            return
+
+        bars = self._cached_fibonacci_bars_for_lifecycle(
+            date_str=date_str,
+            evaluation_end=cutoff,
+            data_feed=data_feed,
+        )
+
+        before = tracker.store.load()
+
+        tracker.finalize_at_cutoff(
+            cutoff=cutoff,
+            bars_by_symbol=bars,
+        )
+
+        after = tracker.store.load()
+
+        changed = [
+            record
+            for paper_order_id, record
+            in after.items()
+            if record != before.get(paper_order_id)
+        ]
+
+        self._print_webull_paper_lifecycle_changes(
+            before=before,
+            changed=changed,
+        )
+
     def run_fibonacci_monitor(
             self,
             date_str: str,
@@ -4763,6 +4952,22 @@ class TradingBot:
                     "External outputs were not rewritten."
                 )
 
+            try:
+                self._process_webull_paper_lifecycle(
+                    date_str=date_str,
+                    evaluation_end=evaluation_end,
+                    data_feed=MARKET_DATA_FEED,
+                )
+            except Exception as error:
+                # Lifecycle tracking must never terminate the
+                # strategy monitor or turn missing market data
+                # into a simulated fill/exit.
+                print(
+                    "WARNING: LOCAL PAPER lifecycle update "
+                    f"failed: {error}. "
+                    "Fibonacci monitoring will continue."
+                )
+
             self._print_fibonacci_cycle_performance(
                 total_seconds=(
                     time_module.perf_counter()
@@ -4794,6 +4999,19 @@ class TradingBot:
                 date_str=date_str,
                 initialise_sheets=False,
                 interactive_paper_confirmation=True,
+            )
+
+        try:
+            self._finalize_webull_paper_lifecycle(
+                date_str=date_str,
+                cutoff=monitor_cutoff,
+                data_feed=MARKET_DATA_FEED,
+            )
+        except Exception as error:
+            print(
+                "WARNING: LOCAL PAPER cutoff finalization "
+                f"failed: {error}. "
+                "No broker action was attempted."
             )
 
         print()

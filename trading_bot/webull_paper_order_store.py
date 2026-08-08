@@ -27,11 +27,26 @@ class WebullPaperOrderRecord:
     submitted_at: datetime
     safety_reason: str
 
-    # Local-paper lifecycle data. These fields never represent
-    # an order submitted to Webull.
+    # Strategy prices required for local lifecycle tracking.
     target_price: float | None = None
     stop_price: float | None = None
+
+    # Local-paper lifecycle state only.
     lifecycle_status: str = "ENTRY PENDING"
+
+    filled_at: datetime | None = None
+    fill_price: float | None = None
+
+    highest_price: float | None = None
+    lowest_price: float | None = None
+    mfe_pct: float | None = None
+    mae_pct: float | None = None
+
+    closed_at: datetime | None = None
+    exit_price: float | None = None
+    exit_reason: str = ""
+    realized_pnl: float | None = None
+    return_pct: float | None = None
 
 
 class WebullPaperOrderStore:
@@ -40,6 +55,8 @@ class WebullPaperOrderStore:
 
     This store contains no approval tokens, token hashes,
     credentials, account IDs, or raw broker responses.
+
+    Lifecycle fields describe LOCAL PAPER simulation only.
     """
 
     def __init__(
@@ -95,6 +112,20 @@ class WebullPaperOrderStore:
         return parsed.astimezone(UTC)
 
     @staticmethod
+    def _parse_optional_datetime(
+        value: Any,
+        *,
+        field_name: str,
+    ) -> datetime | None:
+        if value is None:
+            return None
+
+        return WebullPaperOrderStore._parse_datetime(
+            value,
+            field_name=field_name,
+        )
+
+    @staticmethod
     def _validate_record(
         record: WebullPaperOrderRecord,
     ) -> WebullPaperOrderRecord:
@@ -110,6 +141,7 @@ class WebullPaperOrderStore:
         lifecycle_status = (
             record.lifecycle_status.strip().upper()
         )
+        exit_reason = record.exit_reason.strip().upper()
 
         if not paper_order_id:
             raise WebullPaperOrderStoreError(
@@ -146,8 +178,13 @@ class WebullPaperOrderStore:
                 "Paper-order limit price must be positive."
             )
 
+        limit_price = round(
+            float(record.limit_price),
+            4,
+        )
+
         expected_exposure = round(
-            record.quantity * record.limit_price,
+            record.quantity * limit_price,
             2,
         )
 
@@ -170,11 +207,17 @@ class WebullPaperOrderStore:
                 "safety_reason is required."
             )
 
-        if lifecycle_status != "ENTRY PENDING":
+        if lifecycle_status not in {
+            "ENTRY PENDING",
+            "OPEN",
+            "CLOSED",
+        }:
             raise WebullPaperOrderStoreError(
-                "New paper-order lifecycle status must be "
-                "ENTRY PENDING."
+                "Unsupported paper-order lifecycle status."
             )
+
+        target_price = None
+        stop_price = None
 
         if (
             (record.target_price is None)
@@ -185,14 +228,17 @@ class WebullPaperOrderStore:
                 "both be present or both be absent."
             )
 
-        target_price = None
-        stop_price = None
-
         if record.target_price is not None:
-            target_price = float(record.target_price)
-            stop_price = float(record.stop_price)
+            target_price = round(
+                float(record.target_price),
+                4,
+            )
+            stop_price = round(
+                float(record.stop_price),
+                4,
+            )
 
-            if target_price <= record.limit_price:
+            if target_price <= limit_price:
                 raise WebullPaperOrderStoreError(
                     "Paper-order target must be above "
                     "the BUY limit price."
@@ -203,12 +249,11 @@ class WebullPaperOrderStore:
                     "Paper-order stop must be positive."
                 )
 
-            if stop_price >= record.limit_price:
+            if stop_price >= limit_price:
                 raise WebullPaperOrderStoreError(
                     "Paper-order stop must be below "
                     "the BUY limit price."
                 )
-
 
         WebullPaperOrderStore._format_datetime(
             record.created_at
@@ -217,10 +262,289 @@ class WebullPaperOrderStore:
             record.submitted_at
         )
 
-        if record.submitted_at < record.created_at:
+        created_at = record.created_at.astimezone(UTC)
+        submitted_at = record.submitted_at.astimezone(UTC)
+
+        if submitted_at < created_at:
             raise WebullPaperOrderStoreError(
                 "submitted_at cannot precede created_at."
             )
+
+        filled_at = (
+            None
+            if record.filled_at is None
+            else record.filled_at.astimezone(UTC)
+        )
+
+        closed_at = (
+            None
+            if record.closed_at is None
+            else record.closed_at.astimezone(UTC)
+        )
+
+        if filled_at is not None:
+            WebullPaperOrderStore._format_datetime(
+                filled_at
+            )
+
+            if filled_at < submitted_at:
+                raise WebullPaperOrderStoreError(
+                    "filled_at cannot precede submitted_at."
+                )
+
+        if closed_at is not None:
+            WebullPaperOrderStore._format_datetime(
+                closed_at
+            )
+
+            if (
+                filled_at is not None
+                and closed_at < filled_at
+            ):
+                raise WebullPaperOrderStoreError(
+                    "closed_at cannot precede filled_at."
+                )
+
+        lifecycle_values = (
+            record.fill_price,
+            record.highest_price,
+            record.lowest_price,
+            record.mfe_pct,
+            record.mae_pct,
+        )
+
+        close_values = (
+            record.exit_price,
+            record.realized_pnl,
+            record.return_pct,
+        )
+
+        if lifecycle_status == "ENTRY PENDING":
+            if any(
+                value is not None
+                for value in lifecycle_values
+            ):
+                raise WebullPaperOrderStoreError(
+                    "ENTRY PENDING order cannot contain "
+                    "fill or excursion data."
+                )
+
+            if filled_at is not None:
+                raise WebullPaperOrderStoreError(
+                    "ENTRY PENDING order cannot have filled_at."
+                )
+
+            if (
+                closed_at is not None
+                or any(
+                    value is not None
+                    for value in close_values
+                )
+                or exit_reason
+            ):
+                raise WebullPaperOrderStoreError(
+                    "ENTRY PENDING order cannot contain "
+                    "close data."
+                )
+
+            fill_price = None
+            highest_price = None
+            lowest_price = None
+            mfe_pct = None
+            mae_pct = None
+            exit_price = None
+            realized_pnl = None
+            return_pct = None
+
+        elif (
+            lifecycle_status == "CLOSED"
+            and filled_at is None
+        ):
+            if closed_at is None:
+                raise WebullPaperOrderStoreError(
+                    "NO ENTRY paper order requires "
+                    "closed_at."
+                )
+
+            if exit_reason != "NO ENTRY":
+                raise WebullPaperOrderStoreError(
+                    "Unfilled CLOSED paper order must use "
+                    "NO ENTRY exit reason."
+                )
+
+            if any(
+                value is not None
+                for value in lifecycle_values
+            ):
+                raise WebullPaperOrderStoreError(
+                    "NO ENTRY paper order cannot contain "
+                    "fill or excursion data."
+                )
+
+            if any(
+                value is not None
+                for value in close_values
+            ):
+                raise WebullPaperOrderStoreError(
+                    "NO ENTRY paper order cannot contain "
+                    "exit price or return data."
+                )
+
+            fill_price = None
+            highest_price = None
+            lowest_price = None
+            mfe_pct = None
+            mae_pct = None
+            exit_price = None
+            realized_pnl = None
+            return_pct = None
+
+        else:
+            if target_price is None or stop_price is None:
+                raise WebullPaperOrderStoreError(
+                    "Lifecycle-managed paper order requires "
+                    "target and stop prices."
+                )
+
+            if filled_at is None:
+                raise WebullPaperOrderStoreError(
+                    "OPEN or filled CLOSED paper order "
+                    "requires filled_at."
+                )
+
+            if record.fill_price is None:
+                raise WebullPaperOrderStoreError(
+                    "OPEN or CLOSED paper order requires "
+                    "fill_price."
+                )
+
+            fill_price = round(
+                float(record.fill_price),
+                4,
+            )
+
+            if fill_price <= 0:
+                raise WebullPaperOrderStoreError(
+                    "fill_price must be positive."
+                )
+
+            if record.highest_price is None:
+                raise WebullPaperOrderStoreError(
+                    "Lifecycle-managed order requires "
+                    "highest_price."
+                )
+
+            if record.lowest_price is None:
+                raise WebullPaperOrderStoreError(
+                    "Lifecycle-managed order requires "
+                    "lowest_price."
+                )
+
+            highest_price = round(
+                float(record.highest_price),
+                4,
+            )
+            lowest_price = round(
+                float(record.lowest_price),
+                4,
+            )
+
+            if highest_price < fill_price:
+                raise WebullPaperOrderStoreError(
+                    "highest_price cannot be below "
+                    "fill_price."
+                )
+
+            if lowest_price > fill_price:
+                raise WebullPaperOrderStoreError(
+                    "lowest_price cannot be above "
+                    "fill_price."
+                )
+
+            mfe_pct = round(
+                (
+                    highest_price - fill_price
+                )
+                / fill_price
+                * 100.0,
+                6,
+            )
+
+            mae_pct = round(
+                (
+                    lowest_price - fill_price
+                )
+                / fill_price
+                * 100.0,
+                6,
+            )
+
+            if lifecycle_status == "OPEN":
+                if (
+                    closed_at is not None
+                    or any(
+                        value is not None
+                        for value in close_values
+                    )
+                    or exit_reason
+                ):
+                    raise WebullPaperOrderStoreError(
+                        "OPEN paper order cannot contain "
+                        "close data."
+                    )
+
+                exit_price = None
+                realized_pnl = None
+                return_pct = None
+
+            else:
+                if closed_at is None:
+                    raise WebullPaperOrderStoreError(
+                        "CLOSED paper order requires "
+                        "closed_at."
+                    )
+
+                if record.exit_price is None:
+                    raise WebullPaperOrderStoreError(
+                        "CLOSED paper order requires "
+                        "exit_price."
+                    )
+
+                if exit_reason not in {
+                    "STOP",
+                    "TARGET",
+                    "TIME EXIT",
+                }:
+                    raise WebullPaperOrderStoreError(
+                        "Unsupported paper-order exit reason."
+                    )
+
+                exit_price = round(
+                    float(record.exit_price),
+                    4,
+                )
+
+                if exit_price <= 0:
+                    raise WebullPaperOrderStoreError(
+                        "exit_price must be positive."
+                    )
+
+                realized_pnl = round(
+                    (
+                        exit_price - fill_price
+                    )
+                    * record.quantity,
+                    6,
+                )
+
+                return_pct = round(
+                    (
+                        exit_price - fill_price
+                    )
+                    / fill_price
+                    * 100.0,
+                    6,
+                )
 
         return WebullPaperOrderRecord(
             paper_order_id=paper_order_id,
@@ -229,23 +553,26 @@ class WebullPaperOrderStore:
             symbol=symbol,
             side=side,
             quantity=record.quantity,
-            limit_price=round(record.limit_price, 4),
+            limit_price=limit_price,
             proposed_exposure=expected_exposure,
             status=status,
-            created_at=record.created_at.astimezone(UTC),
-            submitted_at=record.submitted_at.astimezone(UTC),
+            created_at=created_at,
+            submitted_at=submitted_at,
             safety_reason=safety_reason,
-            target_price=(
-                None
-                if target_price is None
-                else round(target_price, 4)
-            ),
-            stop_price=(
-                None
-                if stop_price is None
-                else round(stop_price, 4)
-            ),
+            target_price=target_price,
+            stop_price=stop_price,
             lifecycle_status=lifecycle_status,
+            filled_at=filled_at,
+            fill_price=fill_price,
+            highest_price=highest_price,
+            lowest_price=lowest_price,
+            mfe_pct=mfe_pct,
+            mae_pct=mae_pct,
+            closed_at=closed_at,
+            exit_price=exit_price,
+            exit_reason=exit_reason,
+            realized_pnl=realized_pnl,
+            return_pct=return_pct,
         )
 
     @staticmethod
@@ -259,6 +586,7 @@ class WebullPaperOrderStore:
         )
 
         payload = asdict(validated)
+
         payload["created_at"] = (
             WebullPaperOrderStore._format_datetime(
                 validated.created_at
@@ -269,6 +597,20 @@ class WebullPaperOrderStore:
                 validated.submitted_at
             )
         )
+
+        if validated.filled_at is not None:
+            payload["filled_at"] = (
+                WebullPaperOrderStore._format_datetime(
+                    validated.filled_at
+                )
+            )
+
+        if validated.closed_at is not None:
+            payload["closed_at"] = (
+                WebullPaperOrderStore._format_datetime(
+                    validated.closed_at
+                )
+            )
 
         return payload
 
@@ -300,6 +642,17 @@ class WebullPaperOrderStore:
             "target_price",
             "stop_price",
             "lifecycle_status",
+            "filled_at",
+            "fill_price",
+            "highest_price",
+            "lowest_price",
+            "mfe_pct",
+            "mae_pct",
+            "closed_at",
+            "exit_price",
+            "exit_reason",
+            "realized_pnl",
+            "return_pct",
         }
 
         unknown = set(payload) - required - optional
@@ -329,6 +682,19 @@ class WebullPaperOrderStore:
                 "Stored paper-order numeric fields "
                 "are invalid."
             ) from error
+
+        def optional_float(name: str) -> float | None:
+            value = payload.get(name)
+
+            if value is None:
+                return None
+
+            try:
+                return float(value)
+            except (TypeError, ValueError) as error:
+                raise WebullPaperOrderStoreError(
+                    f"Stored {name} is invalid."
+                ) from error
 
         record = WebullPaperOrderRecord(
             paper_order_id=str(
@@ -361,21 +727,54 @@ class WebullPaperOrderStore:
             safety_reason=str(
                 payload["safety_reason"]
             ),
-            target_price=(
-                None
-                if payload.get("target_price") is None
-                else float(payload["target_price"])
+            target_price=optional_float(
+                "target_price"
             ),
-            stop_price=(
-                None
-                if payload.get("stop_price") is None
-                else float(payload["stop_price"])
+            stop_price=optional_float(
+                "stop_price"
             ),
             lifecycle_status=str(
                 payload.get(
                     "lifecycle_status",
                     "ENTRY PENDING",
                 )
+            ),
+            filled_at=(
+                WebullPaperOrderStore
+                ._parse_optional_datetime(
+                    payload.get("filled_at"),
+                    field_name="filled_at",
+                )
+            ),
+            fill_price=optional_float(
+                "fill_price"
+            ),
+            highest_price=optional_float(
+                "highest_price"
+            ),
+            lowest_price=optional_float(
+                "lowest_price"
+            ),
+            mfe_pct=optional_float("mfe_pct"),
+            mae_pct=optional_float("mae_pct"),
+            closed_at=(
+                WebullPaperOrderStore
+                ._parse_optional_datetime(
+                    payload.get("closed_at"),
+                    field_name="closed_at",
+                )
+            ),
+            exit_price=optional_float(
+                "exit_price"
+            ),
+            exit_reason=str(
+                payload.get("exit_reason", "")
+            ),
+            realized_pnl=optional_float(
+                "realized_pnl"
+            ),
+            return_pct=optional_float(
+                "return_pct"
             ),
         )
 
@@ -420,7 +819,11 @@ class WebullPaperOrderStore:
                 "Paper-order records must be a list."
             )
 
-        records: dict[str, WebullPaperOrderRecord] = {}
+        records: dict[
+            str,
+            WebullPaperOrderRecord,
+        ] = {}
+
         idempotency_keys: set[str] = set()
 
         for raw_record in raw_records:
@@ -445,9 +848,16 @@ class WebullPaperOrderStore:
 
     def save(
         self,
-        records: dict[str, WebullPaperOrderRecord],
+        records: dict[
+            str,
+            WebullPaperOrderRecord,
+        ],
     ) -> None:
-        validated: dict[str, WebullPaperOrderRecord] = {}
+        validated: dict[
+            str,
+            WebullPaperOrderRecord,
+        ] = {}
+
         idempotency_keys: set[str] = set()
 
         for key, raw_record in records.items():
@@ -497,7 +907,10 @@ class WebullPaperOrderStore:
                 encoding="utf-8",
             )
             os.chmod(self.temp_path, 0o600)
-            os.replace(self.temp_path, self.path)
+            os.replace(
+                self.temp_path,
+                self.path,
+            )
             os.chmod(self.path, 0o600)
         except OSError as error:
             try:
@@ -532,5 +945,40 @@ class WebullPaperOrderStore:
                 "DUPLICATE_PAPER_SUBMISSION"
             )
 
-        records[validated.paper_order_id] = validated
+        records[
+            validated.paper_order_id
+        ] = validated
+
         self.save(records)
+
+    def update(
+        self,
+        record: WebullPaperOrderRecord,
+    ) -> WebullPaperOrderRecord:
+        validated = self._validate_record(record)
+        records = self.load()
+
+        existing = records.get(
+            validated.paper_order_id
+        )
+
+        if existing is None:
+            raise WebullPaperOrderStoreError(
+                "PAPER_ORDER_NOT_FOUND"
+            )
+
+        if (
+            existing.idempotency_key
+            != validated.idempotency_key
+        ):
+            raise WebullPaperOrderStoreError(
+                "PAPER_ORDER_IDEMPOTENCY_CHANGED"
+            )
+
+        records[
+            validated.paper_order_id
+        ] = validated
+
+        self.save(records)
+
+        return validated
