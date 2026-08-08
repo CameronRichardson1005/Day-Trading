@@ -71,6 +71,9 @@ from .webull_paper_order_service import (
 from .webull_paper_order_store import (
     WebullPaperOrderRecord,
 )
+from .webull_paper_performance import (
+    load_webull_paper_daily_performance,
+)
 from .replay import HistoricalReplay
 from .scanner import StockScanner
 from .sheets_client import SheetsClient
@@ -4393,6 +4396,28 @@ class TradingBot:
         if self.sheets is None:
             raise RuntimeError(
                 "Google Sheets was not initialised."
+            )
+
+        try:
+            paper_report = (
+                load_webull_paper_daily_performance(
+                    date_str=date_str,
+                )
+            )
+
+            self.sheets.write_paper_performance(
+                report=paper_report,
+            )
+
+            print(
+                "LOCAL PAPER daily performance written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "LOCAL PAPER performance write failed. "
+                f"Reason: {error}"
             )
 
         try:

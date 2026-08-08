@@ -91,19 +91,32 @@ def test_publish_writes_invest_then_previews_then_orders():
     ]
 
 
-def test_finalisation_is_separate():
+def test_finalisation_is_separate(monkeypatch):
     bot = make_bot()
     events = []
 
+    monkeypatch.setattr(
+        "trading_bot.bot.load_webull_paper_daily_performance",
+        lambda **kwargs: SimpleNamespace(
+            date=kwargs["date_str"],
+        ),
+    )
+
     bot.sheets = SimpleNamespace(
+        write_paper_performance=lambda **kwargs: (
+            events.append("paper-performance")
+        ),
         finalise_daily_workbook=lambda **kwargs: (
             events.append("finalise")
-        )
+        ),
     )
 
     bot.finalise_strategy_workbook("2026-08-03")
 
-    assert events == ["finalise"]
+    assert events == [
+        "paper-performance",
+        "finalise",
+    ]
 
 
 def test_compatibility_workflow_can_skip_finalisation():
