@@ -710,3 +710,104 @@ def test_payload_does_not_add_approval_fields_by_default():
 
     assert "webullApprovals" not in payload
     assert "webullSafety" not in payload
+
+
+def test_payload_includes_optional_paper_performance():
+    performance = {
+        "date": "2026-08-07",
+        "ordersApproved": 5,
+        "tradesEntered": 4,
+        "closedTrades": 4,
+        "noEntry": 1,
+        "winRatePct": 75.0,
+        "realizedPnl": 8.42,
+        "simulationOnly": True,
+        "brokerSubmitted": False,
+    }
+
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI_FINAL",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+        paper_performance=performance,
+    )
+
+    assert (
+        payload["paperPerformance"]
+        == performance
+    )
+
+
+def test_payload_omits_paper_performance_when_unavailable():
+    payload = DashboardExporter.build_payload(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+    )
+
+    assert "paperPerformance" not in payload
+
+
+def test_publish_passes_paper_performance_to_endpoint():
+    calls = []
+
+    class Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "accepted": True,
+                "id": "live_fibonacci_final-2026-08-07",
+                "status": "COMPLETE",
+            }
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    exporter = DashboardExporter(
+        url="https://example.test/api/sessions/latest",
+        ingest_key="secret",
+        site_token="site-token",
+        post_fn=post,
+    )
+
+    performance = {
+        "date": "2026-08-07",
+        "realizedPnl": 8.42,
+        "simulationOnly": True,
+        "brokerSubmitted": False,
+    }
+
+    exporter.publish(
+        date_str="2026-08-07",
+        source="LIVE_FIBONACCI_FINAL",
+        stocks={
+            "TEST": complete_stock(),
+        },
+        processed_bars={
+            "TEST": 15,
+        },
+        data_feed="iex",
+        paper_performance=performance,
+    )
+
+    assert (
+        calls[0][1]["json"]["paperPerformance"]
+        == performance
+    )

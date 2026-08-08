@@ -499,6 +499,7 @@ class DashboardExporter:
             symbol_reliability: list[dict[str, Any]] | None = None,
             run_mode: str = "MANUAL",
             webull_approvals: list[dict[str, Any]] | None = None,
+            paper_performance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         source = source.upper()
 
@@ -592,6 +593,11 @@ class DashboardExporter:
                 "submissionEnabled": False,
             }
 
+        if paper_performance is not None:
+            payload["paperPerformance"] = dict(
+                paper_performance
+            )
+
         return payload
 
     def publish(
@@ -604,6 +610,7 @@ class DashboardExporter:
             symbol_reliability: list[dict[str, Any]] | None = None,
             run_mode: str = "MANUAL",
             webull_approvals: list[dict[str, Any]] | None = None,
+            paper_performance: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -622,6 +629,7 @@ class DashboardExporter:
             symbol_reliability=symbol_reliability,
             run_mode=run_mode,
             webull_approvals=webull_approvals,
+            paper_performance=paper_performance,
         )
 
         response = self.post_fn(

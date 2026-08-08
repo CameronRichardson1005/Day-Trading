@@ -856,6 +856,128 @@ class SheetsClient:
             sheet_name="Daily Summary",
         )
 
+    def write_paper_performance(
+        self,
+        *,
+        report,
+    ) -> None:
+        """
+        Store one LOCAL PAPER performance summary row.
+
+        This worksheet reports simulated Webull paper outcomes
+        only. It does not represent broker-submitted orders.
+        """
+        columns = [
+            "Date",
+            "Orders Approved",
+            "Trades Entered",
+            "Open Trades",
+            "Closed Trades",
+            "No Entry",
+            "Target Exits",
+            "Stop Exits",
+            "Time Exits",
+            "Profitable Trades",
+            "Losing Trades",
+            "Breakeven Trades",
+            "Win Rate %",
+            "Realized P&L",
+            "Average P&L / Trade",
+            "Average Return %",
+            "Average Winner",
+            "Average Loser",
+            "Expectancy / Trade",
+            "Average MFE %",
+            "Average MAE %",
+            "Best Trade",
+            "Best Trade P&L",
+            "Worst Trade",
+            "Worst Trade P&L",
+        ]
+
+        row = [
+            report.date,
+            report.orders_approved,
+            report.trades_entered,
+            report.open_trades,
+            report.closed_trades,
+            report.no_entry,
+            report.target_exits,
+            report.stop_exits,
+            report.time_exits,
+            report.profitable_trades,
+            report.losing_trades,
+            report.breakeven_trades,
+            (
+                ""
+                if report.win_rate_pct is None
+                else report.win_rate_pct
+            ),
+            report.realized_pnl,
+            (
+                ""
+                if report.average_pnl_per_trade is None
+                else report.average_pnl_per_trade
+            ),
+            (
+                ""
+                if report.average_return_pct is None
+                else report.average_return_pct
+            ),
+            (
+                ""
+                if report.average_winner is None
+                else report.average_winner
+            ),
+            (
+                ""
+                if report.average_loser is None
+                else report.average_loser
+            ),
+            (
+                ""
+                if report.expectancy_per_trade is None
+                else report.expectancy_per_trade
+            ),
+            (
+                ""
+                if report.average_mfe_pct is None
+                else report.average_mfe_pct
+            ),
+            (
+                ""
+                if report.average_mae_pct is None
+                else report.average_mae_pct
+            ),
+            report.best_trade_symbol or "",
+            (
+                ""
+                if report.best_trade_pnl is None
+                else report.best_trade_pnl
+            ),
+            report.worst_trade_symbol or "",
+            (
+                ""
+                if report.worst_trade_pnl is None
+                else report.worst_trade_pnl
+            ),
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Paper Performance",
+            rows=500,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=report.date,
+            replacement_rows=[row],
+            last_column="Y",
+            sheet_name="Paper Performance",
+        )
+
     def write_production_run(
         self,
         date_str: str,
