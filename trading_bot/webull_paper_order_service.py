@@ -21,6 +21,10 @@ from .webull_preview_store import (
     WebullPreviewStore,
     WebullPreviewStoreError,
 )
+from .webull_paper_risk import (
+    WebullPaperRiskError,
+    evaluate_webull_paper_risk,
+)
 from .webull_safety import WebullOrderProposal
 
 
@@ -206,6 +210,28 @@ class WebullPaperOrderService:
             )
 
         submitted_at = submitted_at.astimezone(UTC)
+
+        try:
+            paper_risk = (
+                evaluate_webull_paper_risk(
+                    records=list(
+                        existing_records.values()
+                    ),
+                    proposed_exposure=(
+                        proposal.proposed_exposure
+                    ),
+                    now=submitted_at,
+                )
+            )
+        except WebullPaperRiskError as error:
+            raise WebullPaperOrderServiceError(
+                f"PAPER_RISK_CHECK_FAILED:{error}"
+            ) from error
+
+        if not paper_risk.allowed:
+            raise WebullPaperOrderServiceError(
+                paper_risk.reason
+            )
 
         try:
             safety = (
