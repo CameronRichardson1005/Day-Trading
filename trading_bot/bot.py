@@ -111,6 +111,7 @@ class TradingBot:
         # opening bars and ATR history from Alpaca.
         self._fibonacci_session_static_cache = {}
         self._fibonacci_intraday_bar_cache = {}
+        self._fibonacci_performance_metrics = {}
 
         try:
             self.webull_approval_queue = (
@@ -3414,6 +3415,83 @@ class TradingBot:
                     f"evaluation failed: {error}"
                 )
 
+    def _set_fibonacci_performance_metric(
+            self,
+            name: str,
+            value,
+    ) -> None:
+        metrics = getattr(
+            self,
+            "_fibonacci_performance_metrics",
+            None,
+        )
+
+        if metrics is None:
+            metrics = {}
+            self._fibonacci_performance_metrics = metrics
+
+        metrics[name] = value
+
+    def _print_fibonacci_cycle_performance(
+            self,
+            *,
+            total_seconds: float,
+            sheets_preview_seconds: float | None = None,
+            dashboard_seconds: float | None = None,
+    ) -> None:
+        metrics = getattr(
+            self,
+            "_fibonacci_performance_metrics",
+            {},
+        )
+
+        print()
+        print("Fibonacci cycle performance:")
+
+        if metrics.get("static_data_cached"):
+            print("  Static session data: cached")
+        elif "static_data_seconds" in metrics:
+            print(
+                "  Static session data: "
+                f"{metrics['static_data_seconds']:.3f}s"
+            )
+
+        if metrics.get("intraday_fetch_cached"):
+            print("  Intraday Alpaca fetch: cached")
+        elif "intraday_fetch_seconds" in metrics:
+            print(
+                "  Intraday Alpaca fetch: "
+                f"{metrics['intraday_fetch_seconds']:.3f}s"
+            )
+
+        if "strategy_compute_seconds" in metrics:
+            print(
+                "  Fibonacci calculation: "
+                f"{metrics['strategy_compute_seconds']:.3f}s"
+            )
+
+        if "strategy_evaluation_seconds" in metrics:
+            print(
+                "  Strategy evaluation total: "
+                f"{metrics['strategy_evaluation_seconds']:.3f}s"
+            )
+
+        if sheets_preview_seconds is not None:
+            print(
+                "  Sheets + Webull preview: "
+                f"{sheets_preview_seconds:.3f}s"
+            )
+
+        if dashboard_seconds is not None:
+            print(
+                "  Dashboard upload: "
+                f"{dashboard_seconds:.3f}s"
+            )
+
+        print(
+            f"  Total cycle: {total_seconds:.3f}s"
+        )
+
     def _get_fibonacci_session_static_data(
             self,
             *,
@@ -3452,7 +3530,17 @@ class TradingBot:
         cached = cache.get(cache_key)
 
         if cached is not None:
+            self._set_fibonacci_performance_metric(
+                "static_data_cached",
+                True,
+            )
+            self._set_fibonacci_performance_metric(
+                "static_data_seconds",
+                0.0,
+            )
             return cached
+
+        static_started = time_module.perf_counter()
 
         opening_bars = (
             self.alpaca.get_opening_15min_bars(
@@ -3476,6 +3564,16 @@ class TradingBot:
         )
 
         cache[cache_key] = result
+
+        self._set_fibonacci_performance_metric(
+            "static_data_cached",
+            False,
+        )
+        self._set_fibonacci_performance_metric(
+            "static_data_seconds",
+            time_module.perf_counter()
+            - static_started,
+        )
 
         return result
 
@@ -3535,6 +3633,15 @@ class TradingBot:
             fetched_through is not None
             and evaluation_end <= fetched_through
         ):
+            self._set_fibonacci_performance_metric(
+                "intraday_fetch_cached",
+                True,
+            )
+            self._set_fibonacci_performance_metric(
+                "intraday_fetch_seconds",
+                0.0,
+            )
+
             end_iso = evaluation_end.astimezone(
                 utc
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -3570,6 +3677,8 @@ class TradingBot:
             utc
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        intraday_started = time_module.perf_counter()
+
         incremental = (
             self.alpaca.get_historical_1min_bars(
                 symbols_csv=self.symbols_csv,
@@ -3577,6 +3686,16 @@ class TradingBot:
                 end_iso=end_iso,
                 feed=data_feed,
             )
+        )
+
+        self._set_fibonacci_performance_metric(
+            "intraday_fetch_cached",
+            False,
+        )
+        self._set_fibonacci_performance_metric(
+            "intraday_fetch_seconds",
+            time_module.perf_counter()
+            - intraday_started,
         )
 
         merged_by_symbol = {}
@@ -3698,6 +3817,10 @@ class TradingBot:
                 )
             )
 
+        strategy_compute_started = (
+            time_module.perf_counter()
+        )
+
         print(
             "Fibonacci evaluation cutoff:",
             evaluation_end_eastern.strftime(
@@ -3735,6 +3858,12 @@ class TradingBot:
                     f"{symbol}: Fibonacci strategy "
                     f"evaluation failed: {error}"
                 )
+
+        self._set_fibonacci_performance_metric(
+            "strategy_compute_seconds",
+            time_module.perf_counter()
+            - strategy_compute_started,
+        )
 
     def calculate_strategy(
             self,
@@ -4536,6 +4665,11 @@ class TradingBot:
                 microsecond=0,
             )
 
+            cycle_started = time_module.perf_counter()
+            self._fibonacci_performance_metrics = {}
+
+            evaluation_started = time_module.perf_counter()
+
             try:
                 self.evaluate_active_strategy(
                     date_str=date_str,
@@ -4555,7 +4689,16 @@ class TradingBot:
                 )
                 continue
 
+            self._set_fibonacci_performance_metric(
+                "strategy_evaluation_seconds",
+                time_module.perf_counter()
+                - evaluation_started,
+            )
+
             signature = self.current_signal_signature()
+
+            sheets_preview_seconds = None
+            dashboard_seconds = None
 
             if signature != last_signature:
                 print(
@@ -4563,10 +4706,19 @@ class TradingBot:
                 )
 
                 if write_sheets:
+                    sheets_preview_started = (
+                        time_module.perf_counter()
+                    )
+
                     self.publish_current_strategy_results(
                         date_str=date_str,
                         initialise_sheets=False,
                         interactive_paper_confirmation=True,
+                    )
+
+                    sheets_preview_seconds = (
+                        time_module.perf_counter()
+                        - sheets_preview_started
                     )
                 else:
                     print(
@@ -4575,6 +4727,10 @@ class TradingBot:
                     )
 
                 if publish_dashboard:
+                    dashboard_started = (
+                        time_module.perf_counter()
+                    )
+
                     processed_bars = {
                         symbol: (
                             stock.green_minutes
@@ -4589,6 +4745,11 @@ class TradingBot:
                         processed_bars=processed_bars,
                         data_feed=MARKET_DATA_FEED,
                     )
+
+                    dashboard_seconds = (
+                        time_module.perf_counter()
+                        - dashboard_started
+                    )
                 else:
                     print(
                         "DRY-RUN MODE: Cloudflare dashboard "
@@ -4601,6 +4762,17 @@ class TradingBot:
                     "No Fibonacci signal change. "
                     "External outputs were not rewritten."
                 )
+
+            self._print_fibonacci_cycle_performance(
+                total_seconds=(
+                    time_module.perf_counter()
+                    - cycle_started
+                ),
+                sheets_preview_seconds=(
+                    sheets_preview_seconds
+                ),
+                dashboard_seconds=dashboard_seconds,
+            )
 
             sleep_fn(
                 FIBONACCI_MONITOR_INTERVAL_SECONDS
