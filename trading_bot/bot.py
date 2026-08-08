@@ -4504,6 +4504,48 @@ class TradingBot:
             )
 
         try:
+            tracker = getattr(
+                self,
+                "webull_paper_lifecycle_tracker",
+                None,
+            )
+
+            portfolio_store = (
+                tracker.store
+                if tracker is not None
+                else None
+            )
+
+            portfolio = getattr(
+                self,
+                "_webull_paper_portfolio_snapshot",
+                None,
+            )
+
+            if portfolio is None:
+                portfolio = (
+                    load_webull_paper_portfolio(
+                        store=portfolio_store,
+                    )
+                )
+
+            self.sheets.write_paper_portfolio(
+                date_str=date_str,
+                portfolio=portfolio,
+            )
+
+            print(
+                "LOCAL PAPER portfolio written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "LOCAL PAPER portfolio write failed. "
+                f"Reason: {error}"
+            )
+
+        try:
             self.sheets.finalise_daily_workbook(
                 date_str=date_str,
             )

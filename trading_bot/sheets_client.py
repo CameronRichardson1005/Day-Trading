@@ -978,6 +978,79 @@ class SheetsClient:
             sheet_name="Paper Performance",
         )
 
+    def write_paper_portfolio(
+        self,
+        *,
+        date_str: str,
+        portfolio,
+    ) -> None:
+        """
+        Store one LOCAL PAPER portfolio snapshot.
+
+        This worksheet represents simulated account state only.
+        It does not represent Webull broker balances, positions,
+        buying power, or submitted orders.
+        """
+        columns = [
+            "Date",
+            "Starting Cash",
+            "Cash",
+            "Buying Power",
+            "Open Cost Basis",
+            "Market Value",
+            "Realized P&L",
+            "Unrealized P&L",
+            "Total P&L",
+            "Equity",
+            "Open Positions",
+            "Closed Positions",
+            "Pending Orders",
+            "No Entry",
+            "Overdrawn",
+            "Simulation Only",
+            "Broker Submitted",
+        ]
+
+        row = [
+            date_str,
+            portfolio.starting_cash,
+            portfolio.cash,
+            portfolio.buying_power,
+            portfolio.open_cost_basis,
+            portfolio.market_value,
+            portfolio.realized_pnl,
+            portfolio.unrealized_pnl,
+            portfolio.total_pnl,
+            portfolio.equity,
+            portfolio.open_position_count,
+            portfolio.closed_position_count,
+            portfolio.pending_order_count,
+            portfolio.no_entry_count,
+            (
+                "YES"
+                if portfolio.overdrawn
+                else "NO"
+            ),
+            "YES",
+            "NO",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Paper Portfolio",
+            rows=500,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=[row],
+            last_column="Q",
+            sheet_name="Paper Portfolio",
+        )
+
+
     def write_production_run(
         self,
         date_str: str,
