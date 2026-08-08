@@ -115,3 +115,86 @@ def test_file_contains_only_redacted_fields(
     assert "accountId" not in serialized
     assert "token_hash" not in serialized
     assert "proposalFingerprint" not in serialized
+
+
+def test_fibonacci_metadata_survives_restart(
+    tmp_path,
+):
+    path = tmp_path / "previews.json"
+
+    enriched = preview()
+    enriched.update({
+        "strategyName": "FIBONACCI_61_8",
+        "rewardRisk": 2.25,
+        "confirmationTime": "10:07",
+        "retracementPrice": 4.24,
+        "impulseAtrMultiple": 0.82,
+        "pullbackVolumeRatio": 0.61,
+    })
+
+    WebullPreviewStore(path).save_previews([
+        enriched
+    ])
+
+    stored = WebullPreviewStore(
+        path
+    ).load_preview("OPEN")
+
+    assert stored is not None
+    assert stored["strategyName"] == (
+        "FIBONACCI_61_8"
+    )
+    assert stored["rewardRisk"] == 2.25
+    assert stored["confirmationTime"] == "10:07"
+    assert stored["retracementPrice"] == 4.24
+    assert stored["impulseAtrMultiple"] == 0.82
+    assert stored["pullbackVolumeRatio"] == 0.61
+
+
+def test_legacy_preview_without_strategy_metadata_loads(
+    tmp_path,
+):
+    path = tmp_path / "previews.json"
+
+    WebullPreviewStore(path).save_previews([
+        preview()
+    ])
+
+    stored = WebullPreviewStore(
+        path
+    ).load_preview("OPEN")
+
+    assert stored is not None
+    assert "strategyName" not in stored
+    assert "rewardRisk" not in stored
+    assert "confirmationTime" not in stored
+    assert "retracementPrice" not in stored
+    assert "impulseAtrMultiple" not in stored
+    assert "pullbackVolumeRatio" not in stored
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("rewardRisk", -1),
+        ("retracementPrice", 0),
+        ("impulseAtrMultiple", -0.1),
+        ("pullbackVolumeRatio", -0.1),
+        ("rewardRisk", float("nan")),
+        ("rewardRisk", float("inf")),
+    ],
+)
+def test_rejects_invalid_strategy_metadata(
+    tmp_path,
+    field,
+    value,
+):
+    invalid = preview()
+    invalid[field] = value
+
+    with pytest.raises(
+        WebullPreviewStoreError,
+    ):
+        WebullPreviewStore(
+            tmp_path / "previews.json"
+        ).save_previews([invalid])
