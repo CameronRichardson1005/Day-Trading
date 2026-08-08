@@ -1019,6 +1019,78 @@ class TradingBot:
             )
             return []
 
+    def _dashboard_paper_performance(
+            self,
+            *,
+            date_str: str,
+            source: str,
+    ) -> dict[str, object] | None:
+        """
+        Return completed LOCAL PAPER performance for the final
+        Fibonacci dashboard session only.
+
+        Ledger failures never interrupt trading or dashboard
+        publishing.
+        """
+        if source.upper() != "LIVE_FIBONACCI_FINAL":
+            return None
+
+        try:
+            report = load_webull_paper_daily_performance(
+                date_str=date_str,
+            )
+        except Exception as error:
+            print(
+                "LOCAL PAPER dashboard performance "
+                "unavailable. "
+                f"Reason: {error}"
+            )
+            return None
+
+        return {
+            "date": report.date,
+            "ordersApproved": report.orders_approved,
+            "tradesEntered": report.trades_entered,
+            "openTrades": report.open_trades,
+            "closedTrades": report.closed_trades,
+            "noEntry": report.no_entry,
+            "targetExits": report.target_exits,
+            "stopExits": report.stop_exits,
+            "timeExits": report.time_exits,
+            "profitableTrades": (
+                report.profitable_trades
+            ),
+            "losingTrades": report.losing_trades,
+            "breakevenTrades": (
+                report.breakeven_trades
+            ),
+            "winRatePct": report.win_rate_pct,
+            "realizedPnl": report.realized_pnl,
+            "averagePnlPerTrade": (
+                report.average_pnl_per_trade
+            ),
+            "averageReturnPct": (
+                report.average_return_pct
+            ),
+            "averageWinner": report.average_winner,
+            "averageLoser": report.average_loser,
+            "expectancyPerTrade": (
+                report.expectancy_per_trade
+            ),
+            "averageMfePct": report.average_mfe_pct,
+            "averageMaePct": report.average_mae_pct,
+            "bestTrade": {
+                "symbol": report.best_trade_symbol,
+                "pnl": report.best_trade_pnl,
+            },
+            "worstTrade": {
+                "symbol": report.worst_trade_symbol,
+                "pnl": report.worst_trade_pnl,
+            },
+            "simulationOnly": True,
+            "brokerSubmitted": False,
+        }
+
     def _publish_dashboard_session(
             self,
             date_str: str,
@@ -1046,6 +1118,12 @@ class TradingBot:
                 ),
                 webull_approvals=(
                     self._dashboard_webull_approvals()
+                ),
+                paper_performance=(
+                    self._dashboard_paper_performance(
+                        date_str=date_str,
+                        source=source,
+                    )
                 ),
             )
         except Exception as error:
