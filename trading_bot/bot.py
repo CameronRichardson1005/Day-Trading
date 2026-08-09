@@ -77,6 +77,9 @@ from .webull_paper_performance import (
 from .webull_paper_analytics import (
     load_webull_paper_analytics,
 )
+from .fibonacci_paper_evaluation import (
+    load_fibonacci_paper_evaluation,
+)
 
 from .webull_paper_portfolio import (
     latest_prices_from_completed_bars,
@@ -4931,6 +4934,27 @@ class TradingBot:
         except Exception as error:
             print(
                 "LOCAL PAPER analytics write failed. "
+                f"Reason: {error}"
+            )
+
+        try:
+            evaluation = (
+                load_fibonacci_paper_evaluation()
+            )
+
+            self.sheets.write_paper_evaluation(
+                date_str=date_str,
+                evaluation=evaluation,
+            )
+
+            print(
+                "FIBONACCI PAPER evaluation written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "FIBONACCI PAPER evaluation write failed. "
                 f"Reason: {error}"
             )
 
