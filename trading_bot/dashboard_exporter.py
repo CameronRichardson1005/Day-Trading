@@ -502,6 +502,7 @@ class DashboardExporter:
             paper_performance: dict[str, Any] | None = None,
             paper_portfolio: dict[str, Any] | None = None,
             paper_analytics: dict[str, Any] | None = None,
+            paper_evaluation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         source = source.upper()
 
@@ -610,6 +611,11 @@ class DashboardExporter:
                 paper_analytics
             )
 
+        if paper_evaluation is not None:
+            payload["paperEvaluation"] = dict(
+                paper_evaluation
+            )
+
         return payload
 
     def publish(
@@ -625,6 +631,7 @@ class DashboardExporter:
             paper_performance: dict[str, Any] | None = None,
             paper_portfolio: dict[str, Any] | None = None,
             paper_analytics: dict[str, Any] | None = None,
+            paper_evaluation: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if not self.ingest_key:
             return None
@@ -646,6 +653,7 @@ class DashboardExporter:
             paper_performance=paper_performance,
             paper_portfolio=paper_portfolio,
             paper_analytics=paper_analytics,
+            paper_evaluation=paper_evaluation,
         )
 
         response = self.post_fn(

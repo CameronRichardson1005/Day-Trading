@@ -1394,6 +1394,74 @@ class TradingBot:
             "brokerSubmitted": False,
         }
 
+    def _dashboard_paper_evaluation(
+            self,
+            *,
+            source: str,
+    ) -> dict[str, object] | None:
+        """
+        Return Fibonacci LOCAL PAPER evaluation for the final
+        live Fibonacci dashboard session only.
+
+        Evaluation failures are nonfatal and cannot modify strategy
+        parameters or order-processing behavior.
+        """
+        if source.upper() != "LIVE_FIBONACCI_FINAL":
+            return None
+
+        try:
+            evaluation = (
+                load_fibonacci_paper_evaluation()
+            )
+        except Exception as error:
+            print(
+                "FIBONACCI PAPER dashboard evaluation "
+                "unavailable. "
+                f"Reason: {error}"
+            )
+            return None
+
+        def finding(value):
+            if value is None:
+                return None
+
+            return {
+                "dimension": value.dimension,
+                "key": value.key,
+                "closedTrades": value.closed_trades,
+                "winRatePct": value.win_rate_pct,
+                "expectancyPerTrade": (
+                    value.expectancy_per_trade
+                ),
+                "averageReturnPct": (
+                    value.average_return_pct
+                ),
+                "realizedPnl": value.realized_pnl,
+                "sampleLabel": value.sample_label,
+            }
+
+        return {
+            "totalOrders": evaluation.total_orders,
+            "closedTrades": evaluation.closed_trades,
+            "evidenceStatus": (
+                evaluation.evidence_status
+            ),
+            "evidenceMessage": (
+                evaluation.evidence_message
+            ),
+            "parameterChangesAllowed": (
+                evaluation.parameter_changes_allowed
+            ),
+            "strongestCohort": finding(
+                evaluation.strongest_cohort
+            ),
+            "weakestCohort": finding(
+                evaluation.weakest_cohort
+            ),
+            "simulationOnly": True,
+            "brokerSubmitted": False,
+        }
+
     def _publish_dashboard_session(
             self,
             date_str: str,
@@ -1436,6 +1504,11 @@ class TradingBot:
                 ),
                 paper_analytics=(
                     self._dashboard_paper_analytics(
+                        source=source,
+                    )
+                ),
+                paper_evaluation=(
+                    self._dashboard_paper_evaluation(
                         source=source,
                     )
                 ),
