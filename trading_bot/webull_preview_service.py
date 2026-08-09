@@ -129,6 +129,24 @@ class WebullPreviewService:
                 "proposedExposure": (
                     preview["proposedExposure"]
                 ),
+                "strategyName": (
+                    preview.get("strategyName")
+                ),
+                "rewardRisk": (
+                    preview.get("rewardRisk")
+                ),
+                "confirmationTime": (
+                    preview.get("confirmationTime")
+                ),
+                "retracementPrice": (
+                    preview.get("retracementPrice")
+                ),
+                "impulseAtrMultiple": (
+                    preview.get("impulseAtrMultiple")
+                ),
+                "pullbackVolumeRatio": (
+                    preview.get("pullbackVolumeRatio")
+                ),
                 "status": "PREVIEW READY",
                 "createdAt": created_at,
             })
@@ -240,6 +258,22 @@ class WebullPreviewService:
                 preview.update({
                     "submitted": False,
                     "safetyAllowed": True,
+                    "strategyName": (
+                        stock.strategy_name or None
+                    ),
+                    "rewardRisk": stock.reward_risk,
+                    "confirmationTime": (
+                        stock.confirmation_time or None
+                    ),
+                    "retracementPrice": (
+                        stock.retracement_price
+                    ),
+                    "impulseAtrMultiple": (
+                        stock.impulse_atr_multiple
+                    ),
+                    "pullbackVolumeRatio": (
+                        stock.pullback_volume_ratio
+                    ),
                     "safetyReason": (
                         "PREVIEW_ELIGIBLE"
                     ),

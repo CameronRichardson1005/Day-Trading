@@ -196,3 +196,55 @@ def test_submitted_time_cannot_precede_creation(
         WebullPaperOrderStore(
             tmp_path / "paper-orders.json"
         ).add(invalid)
+
+
+def test_strategy_metadata_survives_restart(
+    tmp_path,
+):
+    path = tmp_path / "paper-orders.json"
+
+    enriched = record()
+
+    enriched = WebullPaperOrderRecord(
+        **{
+            **enriched.__dict__,
+            "strategy_name": "FIBONACCI_61_8",
+            "reward_risk": 2.25,
+            "confirmation_time": "10:07",
+            "retracement_price": 4.24,
+            "impulse_atr_multiple": 0.82,
+            "pullback_volume_ratio": 0.61,
+        }
+    )
+
+    WebullPaperOrderStore(path).add(enriched)
+
+    stored = WebullPaperOrderStore(
+        path
+    ).load()["paper-1"]
+
+    assert stored.strategy_name == "FIBONACCI_61_8"
+    assert stored.reward_risk == 2.25
+    assert stored.confirmation_time == "10:07"
+    assert stored.retracement_price == 4.24
+    assert stored.impulse_atr_multiple == 0.82
+    assert stored.pullback_volume_ratio == 0.61
+
+
+def test_legacy_paper_order_has_empty_strategy_metadata(
+    tmp_path,
+):
+    path = tmp_path / "paper-orders.json"
+
+    WebullPaperOrderStore(path).add(record())
+
+    stored = WebullPaperOrderStore(
+        path
+    ).load()["paper-1"]
+
+    assert stored.strategy_name is None
+    assert stored.reward_risk is None
+    assert stored.confirmation_time is None
+    assert stored.retracement_price is None
+    assert stored.impulse_atr_multiple is None
+    assert stored.pullback_volume_ratio is None

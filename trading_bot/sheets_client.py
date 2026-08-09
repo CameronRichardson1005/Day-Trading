@@ -978,6 +978,277 @@ class SheetsClient:
             sheet_name="Paper Performance",
         )
 
+    def write_paper_analytics(
+        self,
+        *,
+        date_str: str,
+        report,
+    ) -> None:
+        """
+        Store cumulative LOCAL PAPER analytics by dimension.
+
+        This worksheet contains simulated paper-trading analysis
+        only. It does not represent broker-submitted activity.
+        """
+        columns = [
+            "Date",
+            "Dimension",
+            "Group",
+            "Approved Orders",
+            "Entered Trades",
+            "Closed Trades",
+            "No Entry",
+            "Wins",
+            "Losses",
+            "Breakeven",
+            "Target Exits",
+            "Stop Exits",
+            "Time Exits",
+            "Win Rate %",
+            "Realized P&L",
+            "Average P&L / Trade",
+            "Average Return %",
+            "Expectancy / Trade",
+            "Average MFE %",
+            "Average MAE %",
+            "Sample Label",
+            "Simulation Only",
+            "Broker Submitted",
+        ]
+
+        dimensions = [
+            ("SYMBOL", report.by_symbol),
+            ("ENTRY TIME", report.by_entry_time),
+            ("REWARD/RISK", report.by_reward_risk),
+            ("IMPULSE ATR", report.by_impulse_atr),
+            (
+                "PULLBACK VOLUME",
+                report.by_pullback_volume,
+            ),
+            (
+                "CONFIRMATION TIME",
+                report.by_confirmation_time,
+            ),
+        ]
+
+        rows = []
+
+        for dimension, groups in dimensions:
+            for group in groups:
+                rows.append([
+                    date_str,
+                    dimension,
+                    group.key,
+                    group.approved_orders,
+                    group.entered_trades,
+                    group.closed_trades,
+                    group.no_entry,
+                    group.wins,
+                    group.losses,
+                    group.breakeven,
+                    group.target_exits,
+                    group.stop_exits,
+                    group.time_exits,
+                    (
+                        ""
+                        if group.win_rate_pct is None
+                        else group.win_rate_pct
+                    ),
+                    group.realized_pnl,
+                    (
+                        ""
+                        if group.average_pnl_per_trade
+                        is None
+                        else group.average_pnl_per_trade
+                    ),
+                    (
+                        ""
+                        if group.average_return_pct
+                        is None
+                        else group.average_return_pct
+                    ),
+                    (
+                        ""
+                        if group.expectancy_per_trade
+                        is None
+                        else group.expectancy_per_trade
+                    ),
+                    (
+                        ""
+                        if group.average_mfe_pct is None
+                        else group.average_mfe_pct
+                    ),
+                    (
+                        ""
+                        if group.average_mae_pct is None
+                        else group.average_mae_pct
+                    ),
+                    group.sample_label,
+                    "YES",
+                    "NO",
+                ])
+
+        worksheet = self.get_or_create_worksheet(
+            title="Paper Analytics",
+            rows=1000,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=rows,
+            last_column="W",
+            sheet_name="Paper Analytics",
+        )
+
+    def write_paper_evaluation(
+        self,
+        *,
+        date_str: str,
+        evaluation,
+    ) -> None:
+        """
+        Store one cumulative Fibonacci LOCAL PAPER evaluation.
+
+        This worksheet is research-only. It cannot modify strategy
+        parameters or represent broker-submitted activity.
+        """
+        columns = [
+            "Date",
+            "Evidence Status",
+            "Evidence Message",
+            "Total Orders",
+            "Closed Trades",
+            "Strongest Dimension",
+            "Strongest Group",
+            "Strongest Closed Trades",
+            "Strongest Win Rate %",
+            "Strongest Expectancy / Trade",
+            "Strongest Average Return %",
+            "Strongest Realized P&L",
+            "Strongest Sample Label",
+            "Weakest Dimension",
+            "Weakest Group",
+            "Weakest Closed Trades",
+            "Weakest Win Rate %",
+            "Weakest Expectancy / Trade",
+            "Weakest Average Return %",
+            "Weakest Realized P&L",
+            "Weakest Sample Label",
+            "Parameter Changes Allowed",
+            "Simulation Only",
+            "Broker Submitted",
+        ]
+
+        strongest = evaluation.strongest_cohort
+        weakest = evaluation.weakest_cohort
+
+        row = [
+            date_str,
+            evaluation.evidence_status,
+            evaluation.evidence_message,
+            evaluation.total_orders,
+            evaluation.closed_trades,
+            "" if strongest is None else strongest.dimension,
+            "" if strongest is None else strongest.key,
+            "" if strongest is None else strongest.closed_trades,
+            (
+                ""
+                if (
+                    strongest is None
+                    or strongest.win_rate_pct is None
+                )
+                else strongest.win_rate_pct
+            ),
+            (
+                ""
+                if (
+                    strongest is None
+                    or strongest.expectancy_per_trade is None
+                )
+                else strongest.expectancy_per_trade
+            ),
+            (
+                ""
+                if (
+                    strongest is None
+                    or strongest.average_return_pct is None
+                )
+                else strongest.average_return_pct
+            ),
+            (
+                ""
+                if strongest is None
+                else strongest.realized_pnl
+            ),
+            (
+                ""
+                if strongest is None
+                else strongest.sample_label
+            ),
+            "" if weakest is None else weakest.dimension,
+            "" if weakest is None else weakest.key,
+            "" if weakest is None else weakest.closed_trades,
+            (
+                ""
+                if (
+                    weakest is None
+                    or weakest.win_rate_pct is None
+                )
+                else weakest.win_rate_pct
+            ),
+            (
+                ""
+                if (
+                    weakest is None
+                    or weakest.expectancy_per_trade is None
+                )
+                else weakest.expectancy_per_trade
+            ),
+            (
+                ""
+                if (
+                    weakest is None
+                    or weakest.average_return_pct is None
+                )
+                else weakest.average_return_pct
+            ),
+            (
+                ""
+                if weakest is None
+                else weakest.realized_pnl
+            ),
+            (
+                ""
+                if weakest is None
+                else weakest.sample_label
+            ),
+            (
+                "YES"
+                if evaluation.parameter_changes_allowed
+                else "NO"
+            ),
+            "YES",
+            "NO",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title="Paper Evaluation",
+            rows=500,
+            cols=len(columns),
+        )
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=[row],
+            last_column="X",
+            sheet_name="Paper Evaluation",
+        )
+
     def write_paper_portfolio(
         self,
         *,

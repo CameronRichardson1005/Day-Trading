@@ -74,6 +74,12 @@ from .webull_paper_order_store import (
 from .webull_paper_performance import (
     load_webull_paper_daily_performance,
 )
+from .webull_paper_analytics import (
+    load_webull_paper_analytics,
+)
+from .fibonacci_paper_evaluation import (
+    load_fibonacci_paper_evaluation,
+)
 
 from .webull_paper_portfolio import (
     latest_prices_from_completed_bars,
@@ -1279,6 +1285,183 @@ class TradingBot:
             "brokerSubmitted": False,
         }
 
+    def _dashboard_paper_analytics(
+            self,
+            *,
+            source: str,
+    ) -> dict[str, object] | None:
+        """
+        Return cumulative LOCAL PAPER analytics for the final
+        live Fibonacci dashboard session only.
+
+        Ledger failures are nonfatal and never affect strategy or
+        order-processing behavior.
+        """
+        if source.upper() != "LIVE_FIBONACCI_FINAL":
+            return None
+
+        try:
+            report = load_webull_paper_analytics()
+        except Exception as error:
+            print(
+                "LOCAL PAPER dashboard analytics "
+                "unavailable. "
+                f"Reason: {error}"
+            )
+            return None
+
+        def groups(values):
+            return [
+                {
+                    "key": group.key,
+                    "approvedOrders": (
+                        group.approved_orders
+                    ),
+                    "enteredTrades": (
+                        group.entered_trades
+                    ),
+                    "closedTrades": (
+                        group.closed_trades
+                    ),
+                    "noEntry": group.no_entry,
+                    "wins": group.wins,
+                    "losses": group.losses,
+                    "breakeven": group.breakeven,
+                    "targetExits": (
+                        group.target_exits
+                    ),
+                    "stopExits": group.stop_exits,
+                    "timeExits": group.time_exits,
+                    "winRatePct": (
+                        group.win_rate_pct
+                    ),
+                    "realizedPnl": (
+                        group.realized_pnl
+                    ),
+                    "averagePnlPerTrade": (
+                        group.average_pnl_per_trade
+                    ),
+                    "averageReturnPct": (
+                        group.average_return_pct
+                    ),
+                    "expectancyPerTrade": (
+                        group.expectancy_per_trade
+                    ),
+                    "averageMfePct": (
+                        group.average_mfe_pct
+                    ),
+                    "averageMaePct": (
+                        group.average_mae_pct
+                    ),
+                    "sampleLabel": (
+                        group.sample_label
+                    ),
+                }
+                for group in values
+            ]
+
+        return {
+            "totalOrders": report.total_orders,
+            "enteredTrades": report.entered_trades,
+            "closedTrades": report.closed_trades,
+            "openTrades": report.open_trades,
+            "noEntry": report.no_entry,
+            "realizedPnl": report.realized_pnl,
+            "winRatePct": report.win_rate_pct,
+            "averageReturnPct": (
+                report.average_return_pct
+            ),
+            "expectancyPerTrade": (
+                report.expectancy_per_trade
+            ),
+            "bySymbol": groups(report.by_symbol),
+            "byEntryTime": groups(
+                report.by_entry_time
+            ),
+            "byRewardRisk": groups(
+                report.by_reward_risk
+            ),
+            "byImpulseAtr": groups(
+                report.by_impulse_atr
+            ),
+            "byPullbackVolume": groups(
+                report.by_pullback_volume
+            ),
+            "byConfirmationTime": groups(
+                report.by_confirmation_time
+            ),
+            "simulationOnly": True,
+            "brokerSubmitted": False,
+        }
+
+    def _dashboard_paper_evaluation(
+            self,
+            *,
+            source: str,
+    ) -> dict[str, object] | None:
+        """
+        Return Fibonacci LOCAL PAPER evaluation for the final
+        live Fibonacci dashboard session only.
+
+        Evaluation failures are nonfatal and cannot modify strategy
+        parameters or order-processing behavior.
+        """
+        if source.upper() != "LIVE_FIBONACCI_FINAL":
+            return None
+
+        try:
+            evaluation = (
+                load_fibonacci_paper_evaluation()
+            )
+        except Exception as error:
+            print(
+                "FIBONACCI PAPER dashboard evaluation "
+                "unavailable. "
+                f"Reason: {error}"
+            )
+            return None
+
+        def finding(value):
+            if value is None:
+                return None
+
+            return {
+                "dimension": value.dimension,
+                "key": value.key,
+                "closedTrades": value.closed_trades,
+                "winRatePct": value.win_rate_pct,
+                "expectancyPerTrade": (
+                    value.expectancy_per_trade
+                ),
+                "averageReturnPct": (
+                    value.average_return_pct
+                ),
+                "realizedPnl": value.realized_pnl,
+                "sampleLabel": value.sample_label,
+            }
+
+        return {
+            "totalOrders": evaluation.total_orders,
+            "closedTrades": evaluation.closed_trades,
+            "evidenceStatus": (
+                evaluation.evidence_status
+            ),
+            "evidenceMessage": (
+                evaluation.evidence_message
+            ),
+            "parameterChangesAllowed": (
+                evaluation.parameter_changes_allowed
+            ),
+            "strongestCohort": finding(
+                evaluation.strongest_cohort
+            ),
+            "weakestCohort": finding(
+                evaluation.weakest_cohort
+            ),
+            "simulationOnly": True,
+            "brokerSubmitted": False,
+        }
+
     def _publish_dashboard_session(
             self,
             date_str: str,
@@ -1316,6 +1499,16 @@ class TradingBot:
                 paper_portfolio=(
                     self._dashboard_paper_portfolio(
                         date_str=date_str,
+                        source=source,
+                    )
+                ),
+                paper_analytics=(
+                    self._dashboard_paper_analytics(
+                        source=source,
+                    )
+                ),
+                paper_evaluation=(
+                    self._dashboard_paper_evaluation(
                         source=source,
                     )
                 ),
@@ -4793,6 +4986,48 @@ class TradingBot:
         except Exception as error:
             print(
                 "LOCAL PAPER performance write failed. "
+                f"Reason: {error}"
+            )
+
+        try:
+            analytics_report = (
+                load_webull_paper_analytics()
+            )
+
+            self.sheets.write_paper_analytics(
+                date_str=date_str,
+                report=analytics_report,
+            )
+
+            print(
+                "LOCAL PAPER cumulative analytics written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "LOCAL PAPER analytics write failed. "
+                f"Reason: {error}"
+            )
+
+        try:
+            evaluation = (
+                load_fibonacci_paper_evaluation()
+            )
+
+            self.sheets.write_paper_evaluation(
+                date_str=date_str,
+                evaluation=evaluation,
+            )
+
+            print(
+                "FIBONACCI PAPER evaluation written "
+                "to Google Sheets."
+            )
+
+        except Exception as error:
+            print(
+                "FIBONACCI PAPER evaluation write failed. "
                 f"Reason: {error}"
             )
 

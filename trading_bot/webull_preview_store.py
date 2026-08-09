@@ -51,6 +51,12 @@ class WebullPreviewStore:
         optional = {
             "targetPrice",
             "tradingStopPrice",
+            "strategyName",
+            "rewardRisk",
+            "confirmationTime",
+            "retracementPrice",
+            "impulseAtrMultiple",
+            "pullbackVolumeRatio",
         }
 
         unknown = set(preview) - required - optional
@@ -159,6 +165,101 @@ class WebullPreviewStore:
                 "quantity multiplied by limit price."
             )
 
+        strategy_name = preview.get(
+            "strategyName"
+        )
+        confirmation_time = preview.get(
+            "confirmationTime"
+        )
+
+        if strategy_name is not None:
+            if (
+                not isinstance(strategy_name, str)
+                or not strategy_name.strip()
+            ):
+                raise WebullPreviewStoreError(
+                    "Preview strategyName must be a "
+                    "non-empty string when provided."
+                )
+
+            strategy_name = strategy_name.strip()
+
+        if confirmation_time is not None:
+            if (
+                not isinstance(confirmation_time, str)
+                or not confirmation_time.strip()
+            ):
+                raise WebullPreviewStoreError(
+                    "Preview confirmationTime must be a "
+                    "non-empty string when provided."
+                )
+
+            confirmation_time = (
+                confirmation_time.strip()
+            )
+
+        metadata_numbers = {}
+
+        for field in (
+            "rewardRisk",
+            "retracementPrice",
+            "impulseAtrMultiple",
+            "pullbackVolumeRatio",
+        ):
+            raw_value = preview.get(field)
+
+            if raw_value is None:
+                metadata_numbers[field] = None
+                continue
+
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError) as error:
+                raise WebullPreviewStoreError(
+                    f"Preview {field} is invalid."
+                ) from error
+
+            if not (
+                float("-inf") < value < float("inf")
+            ):
+                raise WebullPreviewStoreError(
+                    f"Preview {field} must be finite."
+                )
+
+            metadata_numbers[field] = value
+
+        if (
+            metadata_numbers["rewardRisk"] is not None
+            and metadata_numbers["rewardRisk"] <= 0
+        ):
+            raise WebullPreviewStoreError(
+                "Preview rewardRisk must be positive."
+            )
+
+        if (
+            metadata_numbers["retracementPrice"] is not None
+            and metadata_numbers["retracementPrice"] <= 0
+        ):
+            raise WebullPreviewStoreError(
+                "Preview retracementPrice must be positive."
+            )
+
+        if (
+            metadata_numbers["impulseAtrMultiple"] is not None
+            and metadata_numbers["impulseAtrMultiple"] < 0
+        ):
+            raise WebullPreviewStoreError(
+                "Preview impulseAtrMultiple cannot be negative."
+            )
+
+        if (
+            metadata_numbers["pullbackVolumeRatio"] is not None
+            and metadata_numbers["pullbackVolumeRatio"] < 0
+        ):
+            raise WebullPreviewStoreError(
+                "Preview pullbackVolumeRatio cannot be negative."
+            )
+
         created_at = preview["createdAt"]
 
         if not isinstance(created_at, str):
@@ -192,6 +293,23 @@ class WebullPreviewStore:
                 .replace("+00:00", "Z")
             ),
         }
+
+        # Strategy metadata is optional so legacy version-1
+        # previews continue to load unchanged.
+        if strategy_name is not None:
+            validated["strategyName"] = strategy_name
+
+        if confirmation_time is not None:
+            validated["confirmationTime"] = (
+                confirmation_time
+            )
+
+        for field, value in metadata_numbers.items():
+            if value is not None:
+                validated[field] = round(
+                    value,
+                    6,
+                )
 
         # Legacy version-1 previews may not contain lifecycle
         # prices. Preserve compatibility when reading them, while
