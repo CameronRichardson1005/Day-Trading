@@ -61,6 +61,9 @@ from .config import (
     FIBONACCI_STRATEGY_NAME,
     MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
+    QUICK_FLIP_MONITOR_CUTOFF,
+    QUICK_FLIP_MONITOR_INTERVAL_SECONDS,
+    QUICK_FLIP_MONITOR_START,
     TICKERS,
 )
 from .dashboard_exporter import DashboardExporter
@@ -794,6 +797,563 @@ class TradingBot:
                 "DRY-RUN MODE: Cloudflare dashboard "
                 "upload was skipped."
             )
+
+        print()
+        print(
+            "Manipulation opening strategy completed. "
+            "Starting independent Quick Flip monitoring..."
+        )
+
+        try:
+            self.run_quick_flip_monitor(
+                date_str=date_str,
+                data_feed=MARKET_DATA_FEED,
+            )
+        except Exception as error:
+            print(
+                "Quick Flip live monitoring failed. "
+                "Manipulation results remain preserved."
+            )
+            print(
+                f"Quick Flip error: {error}"
+            )
+
+
+    def run_quick_flip_monitor(
+            self,
+            date_str: str,
+            now_fn=None,
+            sleep_fn=None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Monitor Quick Flip from 09:45 through 11:00 ET.
+
+        The opening 15-minute candle and Wilder ATR14 are
+        fetched once because they remain fixed for the session.
+
+        Intraday one-minute bars are fetched incrementally and
+        accumulated locally. QuickFlipMonitor then aggregates
+        only complete 5-minute candles.
+
+        This method:
+        - does not alter Manipulation Stock.signal fields;
+        - does not calculate a stop loss;
+        - does not write Google Sheets yet;
+        - does not create a Webull preview yet;
+        - cannot submit a broker order.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        now_fn = now_fn or (
+            lambda: datetime.now(eastern)
+        )
+        sleep_fn = sleep_fn or time_module.sleep
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        monitor_start = self._session_clock(
+            trading_date,
+            QUICK_FLIP_MONITOR_START,
+            eastern,
+        )
+
+        monitor_cutoff = self._session_clock(
+            trading_date,
+            QUICK_FLIP_MONITOR_CUTOFF,
+            eastern,
+        )
+
+        print()
+        print("===================================")
+        print(" Quick Flip Live Monitor")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(
+            "Monitoring window:",
+            QUICK_FLIP_MONITOR_START,
+            "to",
+            QUICK_FLIP_MONITOR_CUTOFF,
+            "New York time",
+        )
+        print(
+            "LONG ONLY · NO AUTOMATIC STOP LOSS"
+        )
+        print(
+            "SIGNAL MONITORING ONLY · "
+            "NO BROKER ORDER SUBMISSION"
+        )
+
+        now = now_fn()
+
+        if now.tzinfo is None:
+            now = now.replace(
+                tzinfo=eastern,
+            )
+        else:
+            now = now.astimezone(
+                eastern
+            )
+
+        if now < monitor_start:
+            wait_seconds = (
+                monitor_start - now
+            ).total_seconds()
+
+            print(
+                "Waiting for Quick Flip monitoring "
+                f"to begin at {QUICK_FLIP_MONITOR_START} ET..."
+            )
+
+            sleep_fn(wait_seconds)
+
+            now = now_fn()
+
+            if now.tzinfo is None:
+                now = now.replace(
+                    tzinfo=eastern,
+                )
+            else:
+                now = now.astimezone(
+                    eastern
+                )
+
+        if now >= monitor_cutoff:
+            print(
+                "Quick Flip monitoring cutoff has "
+                "already passed."
+            )
+            return
+
+        print(
+            "Loading Quick Flip opening ranges "
+            "and ATR14 values..."
+        )
+
+        opening_bars = (
+            self.alpaca.get_opening_15min_bars(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        intraday_bars = {
+            symbol: []
+            for symbol in self.stocks
+        }
+
+        seen_timestamps = {
+            symbol: set()
+            for symbol in self.stocks
+        }
+
+        fetch_start = monitor_start
+        last_signature = None
+
+        def evaluate_current_state(
+                *,
+                evaluation_end: datetime,
+                cutoff_reached: bool,
+        ) -> None:
+            self.quick_flip_results = {}
+            self.quick_flip_status = {}
+
+            for symbol in self.stocks:
+                opening_bar = (
+                    opening_bars.get(symbol)
+                )
+
+                atr_14 = atrs.get(symbol)
+
+                if opening_bar is None:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "MISSING_OPENING_BAR"
+
+                    continue
+
+                if atr_14 is None:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "MISSING_ATR14"
+
+                    continue
+
+                try:
+                    result = (
+                        self.quick_flip_monitor
+                        .evaluate_minute_bars(
+                            symbol=symbol,
+                            opening_bar=(
+                                self
+                                ._quick_flip_candle_from_bar(
+                                    opening_bar
+                                )
+                            ),
+                            atr_14=float(
+                                atr_14
+                            ),
+                            minute_bars=(
+                                intraday_bars[
+                                    symbol
+                                ]
+                            ),
+                            evaluation_end=(
+                                evaluation_end
+                                .astimezone(utc)
+                            ),
+                            cutoff_reached=(
+                                cutoff_reached
+                            ),
+                        )
+                    )
+
+                    self.quick_flip_results[
+                        symbol
+                    ] = result
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = result.status
+
+                except Exception as error:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "EVALUATION_FAILED"
+
+                    print(
+                        f"{symbol}: Quick Flip "
+                        f"evaluation failed: {error}"
+                    )
+
+        while True:
+            now = now_fn()
+
+            if now.tzinfo is None:
+                now = now.replace(
+                    tzinfo=eastern,
+                )
+            else:
+                now = now.astimezone(
+                    eastern
+                )
+
+            if now >= monitor_cutoff:
+                break
+
+            evaluation_end = now.replace(
+                second=0,
+                microsecond=0,
+            )
+
+            if evaluation_end <= monitor_start:
+                sleep_fn(
+                    QUICK_FLIP_MONITOR_INTERVAL_SECONDS
+                )
+                continue
+
+            if evaluation_end > fetch_start:
+                start_utc = (
+                    fetch_start.astimezone(
+                        utc
+                    )
+                )
+
+                end_utc = (
+                    evaluation_end.astimezone(
+                        utc
+                    )
+                )
+
+                try:
+                    fetched = (
+                        self.alpaca
+                        .get_historical_1min_bars(
+                            symbols_csv=self.symbols_csv,
+                            start_iso=start_utc.strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            end_iso=end_utc.strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            feed=data_feed,
+                        )
+                    )
+                except Exception as error:
+                    print(
+                        "WARNING: Quick Flip market-data "
+                        f"fetch failed: {error}. "
+                        "Monitoring will continue."
+                    )
+
+                    sleep_fn(
+                        QUICK_FLIP_MONITOR_INTERVAL_SECONDS
+                    )
+                    continue
+
+                for symbol in self.stocks:
+                    for bar in fetched.get(
+                        symbol,
+                        [],
+                    ):
+                        timestamp = str(
+                            bar.get("t", "")
+                        )
+
+                        if not timestamp:
+                            continue
+
+                        if (
+                            timestamp
+                            in seen_timestamps[
+                                symbol
+                            ]
+                        ):
+                            continue
+
+                        seen_timestamps[
+                            symbol
+                        ].add(
+                            timestamp
+                        )
+
+                        intraday_bars[
+                            symbol
+                        ].append(
+                            dict(bar)
+                        )
+
+                    intraday_bars[
+                        symbol
+                    ].sort(
+                        key=lambda bar: str(
+                            bar["t"]
+                        )
+                    )
+
+                fetch_start = evaluation_end
+
+            evaluate_current_state(
+                evaluation_end=evaluation_end,
+                cutoff_reached=False,
+            )
+
+            signature = tuple(
+                sorted(
+                    (
+                        symbol,
+                        result.status,
+                        (
+                            result.signal.pattern
+                            if (
+                                result is not None
+                                and result.signal
+                                is not None
+                            )
+                            else None
+                        ),
+                        (
+                            result.signal.entry_price
+                            if (
+                                result is not None
+                                and result.signal
+                                is not None
+                            )
+                            else None
+                        ),
+                    )
+                    for symbol, result
+                    in self.quick_flip_results.items()
+                    if result is not None
+                )
+            )
+
+            if signature != last_signature:
+                print()
+                print(
+                    "Quick Flip state changed:"
+                )
+
+                for symbol in sorted(
+                    self.quick_flip_status
+                ):
+                    status = (
+                        self.quick_flip_status[
+                            symbol
+                        ]
+                    )
+
+                    result = (
+                        self.quick_flip_results.get(
+                            symbol
+                        )
+                    )
+
+                    if (
+                        result is not None
+                        and result.signal is not None
+                        and result.signal.signal
+                        == "INVEST"
+                    ):
+                        signal = result.signal
+
+                        print(
+                            f"{symbol}: INVEST · "
+                            f"{signal.pattern} · "
+                            f"Entry ${signal.entry_price:.4f} · "
+                            f"TP1 ${signal.take_profit_1:.4f} · "
+                            f"TP2 ${signal.take_profit_2:.4f}"
+                        )
+                    elif status not in {
+                        "WATCHING",
+                    }:
+                        print(
+                            f"{symbol}: {status}"
+                        )
+
+                last_signature = signature
+
+            sleep_fn(
+                QUICK_FLIP_MONITOR_INTERVAL_SECONDS
+            )
+
+        # --------------------------------------------
+        # Final 11:00 evaluation.
+        # --------------------------------------------
+        if fetch_start < monitor_cutoff:
+            try:
+                final_fetch = (
+                    self.alpaca
+                    .get_historical_1min_bars(
+                        symbols_csv=self.symbols_csv,
+                        start_iso=(
+                            fetch_start
+                            .astimezone(utc)
+                            .strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        ),
+                        end_iso=(
+                            monitor_cutoff
+                            .astimezone(utc)
+                            .strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        ),
+                        feed=data_feed,
+                    )
+                )
+
+                for symbol in self.stocks:
+                    for bar in final_fetch.get(
+                        symbol,
+                        [],
+                    ):
+                        timestamp = str(
+                            bar.get("t", "")
+                        )
+
+                        if (
+                            not timestamp
+                            or timestamp
+                            in seen_timestamps[
+                                symbol
+                            ]
+                        ):
+                            continue
+
+                        seen_timestamps[
+                            symbol
+                        ].add(
+                            timestamp
+                        )
+
+                        intraday_bars[
+                            symbol
+                        ].append(
+                            dict(bar)
+                        )
+
+                    intraday_bars[
+                        symbol
+                    ].sort(
+                        key=lambda bar: str(
+                            bar["t"]
+                        )
+                    )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final Quick Flip "
+                    f"market-data fetch failed: {error}"
+                )
+
+        evaluate_current_state(
+            evaluation_end=monitor_cutoff,
+            cutoff_reached=True,
+        )
+
+        quick_flip_invest = [
+            symbol
+            for symbol, result
+            in self.quick_flip_results.items()
+            if (
+                result is not None
+                and result.signal is not None
+                and result.signal.signal
+                == "INVEST"
+            )
+        ]
+
+        print()
+        print(
+            "Quick Flip monitoring completed."
+        )
+
+        print(
+            "Quick Flip INVEST signals:",
+            (
+                ", ".join(
+                    quick_flip_invest
+                )
+                if quick_flip_invest
+                else "None"
+            ),
+        )
+
+        print(
+            "No Quick Flip stop-loss orders "
+            "were created."
+        )
+
+        print(
+            "No broker orders were submitted."
+        )
 
 
     def run_live_recovery(
