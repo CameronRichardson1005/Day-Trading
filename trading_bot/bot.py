@@ -43,6 +43,9 @@ from .fibonacci_retracement import (
     stopped_out_then_target,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
+from .quick_flip_webull_preview_service import (
+    QuickFlipWebullPreviewService,
+)
 from .quick_flip_monitor import (
     QuickFlipMonitor,
     reconcile_minute_bars,
@@ -812,6 +815,9 @@ class TradingBot:
                 date_str=date_str,
                 data_feed=MARKET_DATA_FEED,
                 stream_factory=AlpacaStockStream,
+                preview_service_factory=(
+                    QuickFlipWebullPreviewService
+                ),
             )
         except Exception as error:
             print(
@@ -830,6 +836,7 @@ class TradingBot:
             sleep_fn=None,
             data_feed: str = MARKET_DATA_FEED,
             stream_factory=None,
+            preview_service_factory=None,
     ) -> None:
         """
         Monitor Quick Flip from 09:45 through 11:00 ET.
@@ -1067,6 +1074,152 @@ class TradingBot:
         fetch_start = monitor_start
         last_signature = None
 
+        # A confirmed setup may remain INVEST across many
+        # one-minute monitoring cycles. Remember exactly which
+        # setups have already generated a Webull preview so the
+        # same signal cannot be previewed repeatedly.
+        previewed_signal_keys = set()
+
+        self.quick_flip_webull_previews = []
+
+        preview_service = (
+            preview_service_factory()
+            if preview_service_factory is not None
+            else None
+        )
+
+        def quick_flip_signal_key(
+                symbol,
+                signal,
+        ):
+            return (
+                symbol,
+                str(signal.pattern),
+                round(
+                    float(signal.entry_price),
+                    6,
+                ),
+                str(
+                    getattr(
+                        signal,
+                        "reversal_time",
+                        None,
+                    )
+                ),
+                str(
+                    getattr(
+                        signal,
+                        "confirmation_time",
+                        None,
+                    )
+                ),
+            )
+
+        def prepare_new_quick_flip_previews():
+            if preview_service is None:
+                return []
+
+            new_results = {}
+            new_keys = {}
+
+            for symbol, result in (
+                self.quick_flip_results.items()
+            ):
+                if result is None:
+                    continue
+
+                signal = getattr(
+                    result,
+                    "signal",
+                    None,
+                )
+
+                if (
+                    signal is None
+                    or signal.signal != "INVEST"
+                ):
+                    continue
+
+                signal_key = (
+                    quick_flip_signal_key(
+                        symbol,
+                        signal,
+                    )
+                )
+
+                if (
+                    signal_key
+                    in previewed_signal_keys
+                ):
+                    continue
+
+                new_results[symbol] = result
+                new_keys[symbol] = signal_key
+
+            if not new_results:
+                return []
+
+            try:
+                previews = (
+                    preview_service
+                    .prepare_previews(
+                        new_results
+                    )
+                )
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip Webull "
+                    "preview preparation failed: "
+                    f"{error}. Monitoring will "
+                    "continue."
+                )
+                return []
+
+            for preview in previews:
+                symbol = preview.get(
+                    "symbol"
+                )
+
+                # Mark the signal as handled once the preview
+                # service has returned a result, whether READY
+                # or FAILED. This prevents a failing Webull/API
+                # condition from hammering the endpoint every
+                # minute for the same setup.
+                if symbol in new_keys:
+                    previewed_signal_keys.add(
+                        new_keys[symbol]
+                    )
+
+                self.quick_flip_webull_previews.append(
+                    preview
+                )
+
+                if (
+                    preview.get("status")
+                    == "PREVIEW READY"
+                ):
+                    print(
+                        f"{symbol}: QUICK FLIP "
+                        "WEBULL PREVIEW READY · "
+                        f"{preview['quantity']} shares · "
+                        f"entry "
+                        f"${preview['limitBuy']:.4f} · "
+                        f"TP1 "
+                        f"${preview['takeProfit1']:.4f} · "
+                        f"TP2 "
+                        f"${preview['takeProfit2']:.4f} · "
+                        "NO AUTOMATIC STOP · "
+                        "NOT SUBMITTED"
+                    )
+                else:
+                    print(
+                        f"{symbol}: QUICK FLIP "
+                        "WEBULL PREVIEW FAILED · "
+                        f"{preview.get('error', 'Unknown error')}"
+                    )
+
+            return previews
+
         def evaluate_current_state(
                 *,
                 evaluation_end: datetime,
@@ -1249,6 +1402,8 @@ class TradingBot:
                 cutoff_reached=False,
             )
 
+            prepare_new_quick_flip_previews()
+
             signature = tuple(
                 sorted(
                     (
@@ -1402,6 +1557,8 @@ class TradingBot:
             evaluation_end=monitor_cutoff,
             cutoff_reached=True,
         )
+
+        prepare_new_quick_flip_previews()
 
         quick_flip_invest = [
             symbol
