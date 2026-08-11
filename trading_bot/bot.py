@@ -470,6 +470,33 @@ class TradingBot:
             sheet_name="Quick Flip Previews",
         )
 
+    def write_new_minute_bars_history(
+            self,
+            date_str: str,
+            bars_by_symbol: dict,
+            source: str,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Archive genuine reconciled one-minute bars in the
+        separate trading workbook.
+
+        Missing minutes are never fabricated.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_minute_bars_history(
+            date_str=date_str,
+            bars_by_symbol=bars_by_symbol,
+            data_feed=data_feed,
+            source=source,
+        )
+
     def run(self) -> None:
         print("===================================")
         print(" Professional Day Trading Bot")
@@ -884,6 +911,51 @@ class TradingBot:
             print(
                 "WebSocket bars merged successfully."
             )
+
+        if write_sheets:
+            opening_stocks = getattr(
+                self,
+                "stocks",
+                {},
+            )
+
+            opening_bars_by_symbol = {
+                symbol: list(
+                    getattr(
+                        stock,
+                        "minute_bars",
+                        [],
+                    )
+                )
+                for symbol, stock
+                in opening_stocks.items()
+            }
+
+            if opening_bars_by_symbol:
+                try:
+                    self.write_new_minute_bars_history(
+                        date_str=date_str,
+                        bars_by_symbol=(
+                            opening_bars_by_symbol
+                        ),
+                        source="LIVE_RECONCILED_OPENING",
+                        data_feed=MARKET_DATA_FEED,
+                    )
+
+                    print(
+                        "Reconciled opening minute bars "
+                        "written to new trading workbook."
+                    )
+
+                except Exception as error:
+                    print(
+                        "WARNING: New trading workbook "
+                        "minute history write failed. "
+                        "Live processing will continue."
+                    )
+                    print(
+                        f"Minute history error: {error}"
+                    )
 
         processed_bars = {
             symbol: (
@@ -1845,6 +1917,54 @@ class TradingBot:
                 )
                 print(
                     f"New workbook error: {error}"
+                )
+
+            try:
+                combined_bars_by_symbol = {}
+
+                for symbol, stock in getattr(
+                    self,
+                    "stocks",
+                    {},
+                ).items():
+                    combined_bars_by_symbol[
+                        symbol
+                    ] = reconcile_minute_bars(
+                        list(
+                            getattr(
+                                stock,
+                                "minute_bars",
+                                [],
+                            )
+                        ),
+                        intraday_bars.get(
+                            symbol,
+                            [],
+                        ),
+                    )
+
+                if combined_bars_by_symbol:
+                    self.write_new_minute_bars_history(
+                        date_str=date_str,
+                        bars_by_symbol=(
+                            combined_bars_by_symbol
+                        ),
+                        source="LIVE_RECONCILED_FULL",
+                        data_feed=data_feed,
+                    )
+
+                    print(
+                        "Final reconciled minute history "
+                        "written to new trading workbook."
+                    )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final new trading workbook "
+                    "minute history write failed."
+                )
+                print(
+                    f"Minute history error: {error}"
                 )
 
         quick_flip_invest = [

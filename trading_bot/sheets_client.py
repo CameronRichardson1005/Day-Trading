@@ -1807,9 +1807,10 @@ class SheetsClient:
     def write_minute_bars_history(
         self,
         date_str: str,
-        stocks: dict,
+        stocks: dict | None = None,
         data_feed: str = "iex",
         source: str = "LIVE",
+        bars_by_symbol: dict | None = None,
     ) -> None:
         """
         Store every genuine reconciled one-minute bar permanently.
@@ -1844,8 +1845,21 @@ class SheetsClient:
             list,
         ] = {}
 
-        for stock in stocks.values():
-            for bar in stock.minute_bars:
+        if bars_by_symbol is None:
+            if stocks is None:
+                raise ValueError(
+                    "stocks or bars_by_symbol is required."
+                )
+
+            source_bars = {
+                stock.symbol: stock.minute_bars
+                for stock in stocks.values()
+            }
+        else:
+            source_bars = bars_by_symbol
+
+        for symbol, bars in source_bars.items():
+            for bar in bars:
                 raw_timestamp = str(
                     bar.get("t", "")
                 ).strip()
@@ -1860,13 +1874,13 @@ class SheetsClient:
                 )
 
                 key = (
-                    stock.symbol,
+                    symbol,
                     timestamp_utc,
                 )
 
                 unique_rows[key] = [
                     date_str,
-                    stock.symbol,
+                    symbol,
                     timestamp_utc,
                     timestamp_et,
                     bar.get("o", ""),
