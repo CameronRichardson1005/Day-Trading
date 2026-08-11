@@ -148,6 +148,15 @@ if not SPREADSHEET_ID:
         "GOOGLE_SPREADSHEET_ID cannot be empty."
     )
 
+# Separate clean workbook for the current Manipulation +
+# Quick Flip workflow. The legacy GOOGLE_SPREADSHEET_ID
+# remains unchanged and continues to preserve the existing
+# workbook/history.
+NEW_TRADING_SPREADSHEET_ID = os.getenv(
+    "NEW_TRADING_SPREADSHEET_ID",
+    "",
+).strip()
+
 SHEETS_REQUEST_TIMEOUT = (10, 20)
 
 SCOPES = [

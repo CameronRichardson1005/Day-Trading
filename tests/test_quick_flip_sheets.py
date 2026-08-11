@@ -167,3 +167,33 @@ def test_sheets_client_can_target_separate_workbook(
     )
 
     assert client.spreadsheet is spreadsheet
+
+
+def test_blank_google_worksheet_can_accept_new_header():
+    SheetsClient._validate_header(
+        existing_values=[[]],
+        expected_columns=[
+            "Date",
+            "Symbol",
+        ],
+        sheet_name="Scanner Dashboard",
+    )
+
+
+def test_existing_wrong_header_is_still_rejected():
+    import pytest
+
+    with pytest.raises(
+        RuntimeError,
+        match="unexpected columns",
+    ):
+        SheetsClient._validate_header(
+            existing_values=[
+                ["Wrong", "Header"],
+            ],
+            expected_columns=[
+                "Date",
+                "Symbol",
+            ],
+            sheet_name="Scanner Dashboard",
+        )

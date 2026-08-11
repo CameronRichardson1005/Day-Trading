@@ -89,7 +89,22 @@ class SheetsClient:
         expected_columns: list[str],
         sheet_name: str,
     ) -> None:
-        if existing_values and existing_values[0] != expected_columns:
+        if not existing_values:
+            return
+
+        first_row = existing_values[0]
+
+        # Google Sheets may represent a newly-created blank
+        # worksheet as [[]]. Treat a row containing no values as
+        # an empty sheet so the production writer can establish
+        # its header normally.
+        if not first_row or not any(
+            str(value).strip()
+            for value in first_row
+        ):
+            return
+
+        if first_row != expected_columns:
             raise RuntimeError(
                 f"{sheet_name} has unexpected columns. "
                 "The sheet was not modified."

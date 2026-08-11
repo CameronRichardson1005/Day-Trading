@@ -68,6 +68,7 @@ from .config import (
     FIBONACCI_STRATEGY_NAME,
     MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
+    NEW_TRADING_SPREADSHEET_ID,
     QUICK_FLIP_MONITOR_CUTOFF,
     QUICK_FLIP_MONITOR_INTERVAL_SECONDS,
     QUICK_FLIP_MONITOR_START,
@@ -141,7 +142,14 @@ class TradingBot:
         self.scanner_statistics = None
         self.symbol_reliability = None
 
+        # Legacy workbook used by the existing tracker and
+        # historical workflow.
         self.sheets = None
+
+        # Separate clean workbook for Manipulation + Quick Flip.
+        # This never replaces self.sheets.
+        self.trading_sheets = None
+
         self.tracker = None
         self.dashboard = DashboardExporter()
 
@@ -340,6 +348,29 @@ class TradingBot:
 
         return selected_symbols
 
+    def initialise_trading_sheets(
+            self,
+    ) -> None:
+        """
+        Initialise the separate clean Manipulation + Quick Flip
+        workbook.
+
+        This method never changes the legacy self.sheets client.
+        """
+        if self.trading_sheets is not None:
+            return
+
+        if not NEW_TRADING_SPREADSHEET_ID:
+            raise RuntimeError(
+                "NEW_TRADING_SPREADSHEET_ID is not configured."
+            )
+
+        self.trading_sheets = SheetsClient(
+            spreadsheet_id=(
+                NEW_TRADING_SPREADSHEET_ID
+            ),
+        )
+
     def initialise_sheets(
             self,
             write_sheets: bool = True,
@@ -355,6 +386,89 @@ class TradingBot:
                 symbols_csv=self.symbols_csv,
                 write_sheets=write_sheets,
             )
+
+    def write_new_trading_scanner(
+            self,
+            date_str: str,
+            selected_symbols,
+    ) -> None:
+        """
+        Write the scanner view to the separate clean
+        Manipulation + Quick Flip workbook.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        if self.scanner_statistics is None:
+            return
+
+        self.trading_sheets.write_scanner_dashboard(
+            date_str=date_str,
+            statistics=self.scanner_statistics,
+            selected_symbols=selected_symbols,
+            scanner=self.scanner,
+        )
+
+    def write_new_manipulation_results(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Copy the current preserved Manipulation strategy state
+        into the separate clean trading workbook.
+
+        The legacy workbook is not modified by this method.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_strategy_results(
+            date_str=date_str,
+            stocks=self.stocks,
+            sheet_name="Manipulation Signals",
+        )
+
+    def write_new_quick_flip_results(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Reconcile Quick Flip signals and Webull previews into
+        the separate clean trading workbook.
+
+        Quick Flip remains long-only with no automatic stop
+        and no broker submission.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_quick_flip_results(
+            date_str=date_str,
+            results=self.quick_flip_results,
+            sheet_name="Quick Flip Signals",
+        )
+
+        self.trading_sheets.write_quick_flip_previews(
+            date_str=date_str,
+            previews=getattr(
+                self,
+                "quick_flip_webull_previews",
+                [],
+            ),
+            sheet_name="Quick Flip Previews",
+        )
 
     def run(self) -> None:
         print("===================================")
@@ -660,6 +774,29 @@ class TradingBot:
                 "scanner statistics were unavailable."
             )
 
+        if (
+            write_sheets
+            and self.scanner_statistics is not None
+        ):
+            try:
+                self.write_new_trading_scanner(
+                    date_str=date_str,
+                    selected_symbols=selected_symbols,
+                )
+                print(
+                    "New trading workbook scanner "
+                    "updated successfully."
+                )
+            except Exception as error:
+                print(
+                    "WARNING: New trading workbook "
+                    "scanner write failed. "
+                    "Live tracking will continue."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
+
         print()
         print("Starting real-time 1-minute tracker...")
         print(
@@ -793,6 +930,25 @@ class TradingBot:
             )
             print(f"Strategy error: {error}")
 
+        if write_sheets:
+            try:
+                self.write_new_manipulation_results(
+                    date_str=date_str,
+                )
+                print(
+                    "Manipulation results written to "
+                    "new trading workbook."
+                )
+            except Exception as error:
+                print(
+                    "WARNING: New trading workbook "
+                    "Manipulation write failed. "
+                    "Legacy results remain preserved."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
+
         if publish_dashboard:
             self._publish_dashboard_session(
                 date_str=date_str,
@@ -819,6 +975,7 @@ class TradingBot:
                 preview_service_factory=(
                     QuickFlipWebullPreviewService
                 ),
+                write_sheets=write_sheets,
             )
         except Exception as error:
             print(
@@ -838,6 +995,7 @@ class TradingBot:
             data_feed: str = MARKET_DATA_FEED,
             stream_factory=None,
             preview_service_factory=None,
+            write_sheets: bool = False,
     ) -> None:
         """
         Monitor Quick Flip from 09:45 through 11:00 ET.
@@ -852,8 +1010,9 @@ class TradingBot:
         This method:
         - does not alter Manipulation Stock.signal fields;
         - does not calculate a stop loss;
-        - does not write Google Sheets yet;
-        - does not create a Webull preview yet;
+        - writes only to the separate trading workbook when
+          write_sheets=True;
+        - may create preview-only Webull requests;
         - cannot submit a broker order.
         """
         eastern = ZoneInfo("America/New_York")
@@ -1564,6 +1723,27 @@ class TradingBot:
                             f"{symbol}: {status}"
                         )
 
+                if write_sheets:
+                    try:
+                        self.write_new_quick_flip_results(
+                            date_str=date_str,
+                        )
+
+                        print(
+                            "Quick Flip state written to "
+                            "new trading workbook."
+                        )
+
+                    except Exception as error:
+                        print(
+                            "WARNING: New trading workbook "
+                            "Quick Flip write failed. "
+                            "Monitoring will continue."
+                        )
+                        print(
+                            f"New workbook error: {error}"
+                        )
+
                 last_signature = signature
 
             sleep_fn(
@@ -1646,6 +1826,26 @@ class TradingBot:
         )
 
         prepare_new_quick_flip_previews()
+
+        if write_sheets:
+            try:
+                self.write_new_quick_flip_results(
+                    date_str=date_str,
+                )
+
+                print(
+                    "Final Quick Flip state written to "
+                    "new trading workbook."
+                )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final new trading workbook "
+                    "Quick Flip write failed."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
 
         quick_flip_invest = [
             symbol
