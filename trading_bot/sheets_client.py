@@ -211,6 +211,47 @@ class SheetsClient:
 
         sheet_id = worksheet.id
 
+        # Keep columns wide enough that words are not
+        # displayed one letter per line.
+        column_widths = []
+
+        for column_index in range(column_count):
+            cell_values = [
+                str(row[column_index])
+                for row in values
+                if column_index < len(row)
+            ]
+
+            longest_word = max(
+                (
+                    len(word)
+                    for value in cell_values
+                    for word in value.split()
+                ),
+                default=0,
+            )
+
+            longest_cell = max(
+                (
+                    len(value)
+                    for value in cell_values
+                ),
+                default=0,
+            )
+
+            width = max(
+                100,
+                longest_word * 8 + 28,
+                min(
+                    longest_cell * 7 + 28,
+                    240,
+                ),
+            )
+
+            column_widths.append(
+                min(width, 260)
+            )
+
         for update in updates:
             row_number = update["row"]
             row_index = row_number - 1
@@ -400,6 +441,48 @@ class SheetsClient:
         column_count = max(len(columns), 1)
         sheet_id = worksheet.id
 
+        # Keep columns wide enough that words are not displayed
+        # one letter per line. Long columns are capped so the
+        # worksheet remains easy to scan.
+        column_widths = []
+
+        for column_index in range(column_count):
+            cell_values = [
+                str(row[column_index])
+                for row in values
+                if column_index < len(row)
+            ]
+
+            longest_word = max(
+                (
+                    len(word)
+                    for value in cell_values
+                    for word in value.split()
+                ),
+                default=0,
+            )
+
+            longest_cell = max(
+                (
+                    len(value)
+                    for value in cell_values
+                ),
+                default=0,
+            )
+
+            width = max(
+                100,
+                longest_word * 8 + 28,
+                min(
+                    longest_cell * 7 + 28,
+                    240,
+                ),
+            )
+
+            column_widths.append(
+                min(width, 260)
+            )
+
         header_background = {
             "red": 0.09,
             "green": 0.20,
@@ -480,7 +563,7 @@ class SheetsClient:
                         "userEnteredFormat": {
                             "backgroundColor": body_background,
                             "verticalAlignment": "MIDDLE",
-                            "wrapStrategy": "WRAP",
+                            "wrapStrategy": "CLIP",
                             "textFormat": {
                                 "fontSize": 10,
                             },
@@ -495,16 +578,25 @@ class SheetsClient:
                     "fields": "userEnteredFormat",
                 }
             },
+                    *[
             {
-                "autoResizeDimensions": {
-                    "dimensions": {
+                "updateDimensionProperties": {
+                    "range": {
                         "sheetId": sheet_id,
                         "dimension": "COLUMNS",
-                        "startIndex": 0,
-                        "endIndex": column_count,
-                    }
+                        "startIndex": column_index,
+                        "endIndex": column_index + 1,
+                    },
+                    "properties": {
+                        "pixelSize": pixel_width,
+                    },
+                    "fields": "pixelSize",
                 }
-            },
+            }
+            for column_index, pixel_width
+            in enumerate(column_widths)
+        ],
+
             {
                 "updateDimensionProperties": {
                     "range": {
@@ -1821,7 +1913,6 @@ class SheetsClient:
         columns = [
             "Date",
             "Symbol",
-            "Timestamp UTC",
             "Timestamp ET",
             "Open",
             "High",
@@ -1881,7 +1972,6 @@ class SheetsClient:
                 unique_rows[key] = [
                     date_str,
                     symbol,
-                    timestamp_utc,
                     timestamp_et,
                     bar.get("o", ""),
                     bar.get("h", ""),
@@ -1910,7 +2000,7 @@ class SheetsClient:
             columns=columns,
             date_str=date_str,
             replacement_rows=history_rows,
-            last_column="M",
+            last_column="L",
             sheet_name="Minute Bars History",
         )
 
