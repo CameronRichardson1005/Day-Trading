@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from zoneinfo import ZoneInfo
 
 from .webull_preview_service import WebullPreviewService
@@ -811,6 +811,7 @@ class TradingBot:
             self.run_quick_flip_monitor(
                 date_str=date_str,
                 data_feed=MARKET_DATA_FEED,
+                stream_factory=AlpacaStockStream,
             )
         except Exception as error:
             print(
@@ -828,6 +829,7 @@ class TradingBot:
             now_fn=None,
             sleep_fn=None,
             data_feed: str = MARKET_DATA_FEED,
+            stream_factory=None,
     ) -> None:
         """
         Monitor Quick Flip from 09:45 through 11:00 ET.
@@ -958,6 +960,110 @@ class TradingBot:
             for symbol in self.stocks
         }
 
+        stream = None
+        stream_stop_event = None
+        stream_thread = None
+        stream_error = {
+            "value": None,
+        }
+
+        if stream_factory is not None:
+            try:
+                stream = stream_factory(
+                    symbols=list(
+                        self.stocks
+                    ),
+                    feed=data_feed,
+                )
+
+                stream_stop_event = Event()
+
+                stream_stop_time = (
+                    monitor_cutoff
+                    .astimezone(utc)
+                    .replace(tzinfo=None)
+                )
+
+                def collect_quick_flip_stream():
+                    try:
+                        stream.collect_until(
+                            stop_time=(
+                                stream_stop_time
+                            ),
+                            stop_event=(
+                                stream_stop_event
+                            ),
+                        )
+                    except Exception as error:
+                        stream_error[
+                            "value"
+                        ] = error
+
+                stream_thread = Thread(
+                    target=(
+                        collect_quick_flip_stream
+                    ),
+                    name=(
+                        "quick-flip-alpaca-stream"
+                    ),
+                    daemon=True,
+                )
+
+                print(
+                    "Starting Quick Flip "
+                    f"{data_feed.upper()} "
+                    "WebSocket collector..."
+                )
+
+                stream_thread.start()
+
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip WebSocket "
+                    f"could not start: {error}. "
+                    "REST reconciliation will "
+                    "continue."
+                )
+
+                stream = None
+                stream_stop_event = None
+                stream_thread = None
+
+        def merge_stream_snapshot() -> None:
+            """
+            Merge the latest WebSocket representation first.
+
+            REST reconciliation is deliberately applied after
+            this function so REST remains authoritative when
+            both sources contain the same completed minute.
+            """
+            if stream is None:
+                return
+
+            try:
+                snapshot = stream.snapshot()
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip WebSocket "
+                    f"snapshot failed: {error}. "
+                    "REST reconciliation will "
+                    "continue."
+                )
+                return
+
+            for symbol in self.stocks:
+                intraday_bars[
+                    symbol
+                ] = reconcile_minute_bars(
+                    intraday_bars[
+                        symbol
+                    ],
+                    snapshot.get(
+                        symbol,
+                        [],
+                    ),
+                )
+
         fetch_start = monitor_start
         last_signature = None
 
@@ -1075,6 +1181,9 @@ class TradingBot:
                 )
                 continue
 
+            # Fast source first.
+            merge_stream_snapshot()
+
             if evaluation_end > fetch_start:
                 start_utc = (
                     fetch_start.astimezone(
@@ -1087,6 +1196,8 @@ class TradingBot:
                         utc
                     )
                 )
+
+                rest_fetch_succeeded = False
 
                 try:
                     fetched = (
@@ -1102,18 +1213,21 @@ class TradingBot:
                             feed=data_feed,
                         )
                     )
+
+                    rest_fetch_succeeded = True
+
                 except Exception as error:
                     print(
                         "WARNING: Quick Flip market-data "
                         f"fetch failed: {error}. "
-                        "Monitoring will continue."
+                        "WebSocket data will be used "
+                        "when available and REST will "
+                        "retry."
                     )
 
-                    sleep_fn(
-                        QUICK_FLIP_MONITOR_INTERVAL_SECONDS
-                    )
-                    continue
+                    fetched = {}
 
+                # Authoritative reconciliation second.
                 for symbol in self.stocks:
                     intraday_bars[
                         symbol
@@ -1127,7 +1241,8 @@ class TradingBot:
                         ),
                     )
 
-                fetch_start = evaluation_end
+                if rest_fetch_succeeded:
+                    fetch_start = evaluation_end
 
             evaluate_current_state(
                 evaluation_end=evaluation_end,
@@ -1212,6 +1327,30 @@ class TradingBot:
             sleep_fn(
                 QUICK_FLIP_MONITOR_INTERVAL_SECONDS
             )
+
+        # --------------------------------------------
+        # Stop the WebSocket collector at the cutoff.
+        # --------------------------------------------
+        if stream_stop_event is not None:
+            stream_stop_event.set()
+
+        if stream_thread is not None:
+            stream_thread.join(
+                timeout=2
+            )
+
+        if stream_error["value"] is not None:
+            print(
+                "WARNING: Quick Flip WebSocket "
+                f"collector stopped with error: "
+                f"{stream_error['value']}. "
+                "Final REST reconciliation will "
+                "continue."
+            )
+
+        # Capture the final stream representation before
+        # applying the authoritative REST reconciliation.
+        merge_stream_snapshot()
 
         # --------------------------------------------
         # Final 11:00 evaluation.

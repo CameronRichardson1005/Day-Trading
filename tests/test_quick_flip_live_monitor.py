@@ -262,3 +262,174 @@ def test_live_monitor_stops_at_1100():
     assert bot.alpaca.atr_calls == 0
 
     assert bot.alpaca.minute_calls == []
+
+
+def test_rest_reconciliation_overrides_stream_bar(
+    monkeypatch,
+):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from trading_bot.bot import TradingBot
+    from trading_bot.models import Stock
+
+    eastern = ZoneInfo("America/New_York")
+
+    bot = object.__new__(TradingBot)
+
+    bot.stocks = {
+        "OPEN": Stock(symbol="OPEN"),
+    }
+
+    bot.symbols_csv = "OPEN"
+
+    class FakeAlpaca:
+        def get_opening_15min_bars(
+            self,
+            symbols_csv,
+            date_str,
+            feed,
+        ):
+            return {
+                "OPEN": {
+                    "t": "2026-08-11T13:30:00Z",
+                    "o": 10.00,
+                    "h": 11.00,
+                    "l": 9.00,
+                    "c": 9.50,
+                }
+            }
+
+        def get_previous_day_ranges_all(
+            self,
+            symbols_csv,
+            date_str,
+            feed,
+        ):
+            return {
+                "OPEN": 1.00,
+            }
+
+        def get_historical_1min_bars(
+            self,
+            symbols_csv,
+            start_iso,
+            end_iso,
+            feed,
+        ):
+            return {
+                "OPEN": [
+                    {
+                        "t": "2026-08-11T13:45:00Z",
+                        "o": 10.00,
+                        "h": 10.35,
+                        "l": 9.88,
+                        "c": 10.30,
+                        "v": 175,
+                    }
+                ]
+            }
+
+    bot.alpaca = FakeAlpaca()
+
+    captured = {}
+
+    class FakeQuickFlipMonitor:
+        def evaluate_minute_bars(
+            self,
+            *,
+            symbol,
+            opening_bar,
+            atr_14,
+            minute_bars,
+            evaluation_end,
+            cutoff_reached,
+        ):
+            if minute_bars:
+                captured["bar"] = dict(
+                    minute_bars[0]
+                )
+
+            class Result:
+                status = "WATCHING"
+                signal = None
+
+            return Result()
+
+    bot.quick_flip_monitor = (
+        FakeQuickFlipMonitor()
+    )
+
+    bot.quick_flip_results = {}
+    bot.quick_flip_status = {}
+
+    class FakeStream:
+        def __init__(
+            self,
+            symbols,
+            feed,
+        ):
+            self.symbols = symbols
+
+        def collect_until(
+            self,
+            stop_time,
+            stop_event=None,
+        ):
+            return self.snapshot()
+
+        def snapshot(self):
+            return {
+                "OPEN": [
+                    {
+                        "t": "2026-08-11T13:45:00Z",
+                        "o": 10.00,
+                        "h": 10.20,
+                        "l": 9.90,
+                        "c": 10.10,
+                        "v": 100,
+                    }
+                ]
+            }
+
+    times = iter(
+        [
+            datetime(
+                2026,
+                8,
+                11,
+                9,
+                46,
+                tzinfo=eastern,
+            ),
+            datetime(
+                2026,
+                8,
+                11,
+                9,
+                46,
+                tzinfo=eastern,
+            ),
+            datetime(
+                2026,
+                8,
+                11,
+                11,
+                0,
+                tzinfo=eastern,
+            ),
+        ]
+    )
+
+    bot.run_quick_flip_monitor(
+        date_str="2026-08-11",
+        now_fn=lambda: next(times),
+        sleep_fn=lambda seconds: None,
+        data_feed="iex",
+        stream_factory=FakeStream,
+    )
+
+    assert captured["bar"]["h"] == 10.35
+    assert captured["bar"]["l"] == 9.88
+    assert captured["bar"]["c"] == 10.30
+    assert captured["bar"]["v"] == 175
