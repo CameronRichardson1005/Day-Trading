@@ -24,6 +24,15 @@ def make_client():
 
     client._replace_date_rows = fake_replace
 
+    client.formatted_titles = []
+
+    def fake_format(worksheet):
+        client.formatted_titles.append(
+            worksheet.title
+        )
+
+    client.format_worksheet = fake_format
+
     return client, calls
 
 
@@ -86,6 +95,10 @@ def test_write_webull_trade_pnl():
     assert row[11] == 0.0
     assert row[12] == "CLOSED"
     assert row[13] == "WEBULL ORDER HISTORY"
+
+    assert client.formatted_titles == [
+        "Daily Trade P&L",
+    ]
 
 
 def test_write_webull_trade_pnl_marks_remaining_position():
@@ -173,3 +186,7 @@ def test_write_webull_pnl_summary():
         12.0,
         "WEBULL ORDER HISTORY",
     ]]
+
+    assert client.formatted_titles == [
+        "Daily P&L Summary",
+    ]

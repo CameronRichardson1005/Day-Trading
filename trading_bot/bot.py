@@ -6456,6 +6456,86 @@ class TradingBot:
 
         return submitted_records
 
+    @staticmethod
+    def _notify_manipulation_preview(
+            preview: dict,
+    ) -> None:
+        """
+        Show a macOS desktop notification for a newly created
+        Manipulation Webull preview.
+
+        Notification failure never interrupts strategy execution.
+        """
+        if preview.get("status") != "PREVIEW READY":
+            return
+
+        symbol = str(
+            preview.get("symbol", "")
+        )
+
+        quantity = int(
+            preview.get("quantity", 0)
+        )
+
+        entry = float(
+            preview.get("limitBuy", 0)
+        )
+
+        target = float(
+            preview.get("target", 0)
+        )
+
+        trading_stop = float(
+            preview.get("tradingStopLoss", 0)
+        )
+
+        title = (
+            "Manipulation Webull Preview Ready"
+        )
+
+        message = (
+            f"{symbol} · {quantity} shares · "
+            f"Entry ${entry:.4f} · "
+            f"Target ${target:.4f} · "
+            f"Trading Stop ${trading_stop:.4f}"
+        )
+
+        safe_title = (
+            title
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+        )
+
+        safe_message = (
+            message
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+        )
+
+        script = (
+            'display notification '
+            f'"{safe_message}" '
+            f'with title "{safe_title}"'
+        )
+
+        try:
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    script,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception as error:
+            print(
+                "WARNING: Manipulation preview "
+                f"notification failed: {error}"
+            )
+
     def prepare_webull_previews(
             self,
     ) -> list[dict]:
@@ -6486,6 +6566,10 @@ class TradingBot:
                 status = preview["status"]
 
                 if status == "PREVIEW READY":
+                    self._notify_manipulation_preview(
+                        preview
+                    )
+
                     print(
                         f"{symbol}: PREVIEW READY · "
                         f"{preview['quantity']} shares · "

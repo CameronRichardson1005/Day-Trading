@@ -967,6 +967,58 @@ def main() -> int:
             print("LOCAL PAPER LEDGER ONLY")
             print("NO WEBULL BROKER ORDER WAS SUBMITTED")
 
+        elif mode == "webull-pnl":
+            if len(sys.argv) != 3:
+                print(
+                    "Usage: python main.py "
+                    "webull-pnl YYYY-MM-DD"
+                )
+                return 2
+
+            date_str = sys.argv[2]
+
+            try:
+                result = bot.write_webull_daily_pnl(
+                    date_str=date_str,
+                )
+            except Exception as error:
+                print(
+                    "Webull P&L import failed: "
+                    f"{error}"
+                )
+                return 1
+
+            summary = result["summary"]
+
+            print()
+            print("WEBULL DAILY P&L IMPORT COMPLETE")
+            print("--------------------------------")
+            print(
+                f"Trading date: {summary.date}"
+            )
+            print(
+                f"Closed trades: "
+                f"{summary.closed_trades}"
+            )
+            print(
+                f"Winning trades: "
+                f"{summary.winning_trades}"
+            )
+            print(
+                f"Losing trades: "
+                f"{summary.losing_trades}"
+            )
+            print(
+                "Gross realized P&L: "
+                f"${summary.realized_pnl:.2f}"
+            )
+            print(
+                "READ-ONLY WEBULL ORDER HISTORY"
+            )
+            print(
+                "NO WEBULL BROKER ORDER WAS SUBMITTED"
+            )
+
         elif mode == "production":
             bot.run_production()
 
@@ -985,7 +1037,8 @@ def main() -> int:
                 "fibonacci-paper-publish, "
                 "backtest, webull-approval-request, "
                 "webull-approval-confirm, "
-                "webull-paper-submit, production"
+                "webull-paper-submit, webull-pnl, "
+                "production"
             )
             return 2
 

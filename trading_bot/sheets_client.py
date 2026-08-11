@@ -2495,6 +2495,8 @@ class SheetsClient:
             sheet_name=sheet_name,
         )
 
+        self.format_worksheet(worksheet)
+
         print(
             f"{len(rows)} realized Webull trade row(s) "
             f"reconciled in the {sheet_name} sheet."
@@ -2555,6 +2557,8 @@ class SheetsClient:
             last_column="J",
             sheet_name=sheet_name,
         )
+
+        self.format_worksheet(worksheet)
 
         print(
             "Webull daily P&L summary reconciled in "
