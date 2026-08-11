@@ -107,6 +107,13 @@ def test_live_strategy_runs_before_dashboard(
         FakeStream,
     )
 
+        # Quick Flip's real 09:45-11:00 monitor is tested
+    # separately. This routing test must not enter a
+    # real-time sleep.
+    bot.run_quick_flip_monitor = (
+        lambda **kwargs: events.append("quick-flip")
+    )
+
     bot.run_live_tracker(
         write_sheets=True,
         publish_dashboard=True,
