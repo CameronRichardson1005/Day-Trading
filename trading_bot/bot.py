@@ -475,6 +475,128 @@ class TradingBot:
             sheet_name="Quick Flip Previews",
         )
 
+        self.write_trade_previews_dashboard(
+            date_str=date_str,
+        )
+
+    def write_trade_previews_dashboard(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Rebuild the concise today-only preview dashboard from
+        Manipulation and Quick Flip PREVIEW READY records.
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        eastern = ZoneInfo("America/New_York")
+
+        previews = []
+
+        for stock in getattr(
+            self,
+            "stocks",
+            {},
+        ).values():
+            preview = getattr(
+                stock,
+                "webull_preview",
+                None,
+            )
+
+            if (
+                not isinstance(preview, dict)
+                or preview.get("status")
+                != "PREVIEW READY"
+            ):
+                continue
+
+            previews.append({
+                "time": datetime.now(
+                    eastern
+                ).strftime("%H:%M:%S"),
+                "strategy": "Manipulation",
+                "symbol": stock.symbol,
+                "entry": preview.get(
+                    "limitBuy",
+                    "",
+                ),
+                "exit": preview.get(
+                    "target",
+                    "",
+                ),
+                "quantity": preview.get(
+                    "quantity",
+                    "",
+                ),
+                "status": "PREVIEW READY",
+            })
+
+        for preview in getattr(
+            self,
+            "quick_flip_webull_previews",
+            [],
+        ):
+            if (
+                not isinstance(preview, dict)
+                or preview.get("status")
+                != "PREVIEW READY"
+            ):
+                continue
+
+            tp1 = preview.get(
+                "takeProfit1",
+                "",
+            )
+            tp2 = preview.get(
+                "takeProfit2",
+                "",
+            )
+
+            if tp1 != "" and tp2 != "":
+                exit_value = (
+                    f"{tp1} / {tp2}"
+                )
+            elif tp1 != "":
+                exit_value = tp1
+            else:
+                exit_value = tp2
+
+            previews.append({
+                "time": datetime.now(
+                    eastern
+                ).strftime("%H:%M:%S"),
+                "strategy": "Quick Flip",
+                "symbol": preview.get(
+                    "symbol",
+                    "",
+                ),
+                "entry": preview.get(
+                    "limitBuy",
+                    "",
+                ),
+                "exit": exit_value,
+                "quantity": preview.get(
+                    "quantity",
+                    "",
+                ),
+                "status": "PREVIEW READY",
+            })
+
+        self.trading_sheets.write_trade_previews_today(
+            date_str=date_str,
+            previews=previews,
+            sheet_name="Trade Previews",
+        )
+
     def write_new_minute_bars_history(
             self,
             date_str: str,
@@ -1174,6 +1296,14 @@ class TradingBot:
                 print(
                     "Manipulation results written to "
                     "new trading workbook."
+                )
+
+                self.write_trade_previews_dashboard(
+                    date_str=date_str,
+                )
+
+                print(
+                    "Trade Previews dashboard updated."
                 )
             except Exception as error:
                 print(

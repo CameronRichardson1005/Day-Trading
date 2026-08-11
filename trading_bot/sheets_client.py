@@ -2565,6 +2565,113 @@ class SheetsClient:
             f"the {sheet_name} sheet."
         )
 
+    def write_trade_previews_today(
+            self,
+            date_str: str,
+            previews: list[dict],
+            sheet_name: str = "Trade Previews",
+    ) -> None:
+        """
+        Replace the today-only preview dashboard.
+
+        This sheet intentionally shows only concise preview data.
+        Historical detail remains preserved in the strategy-specific
+        worksheets.
+        """
+        columns = [
+            "Time",
+            "Strategy",
+            "Stock",
+            "Entry",
+            "Exit",
+            "Quantity",
+            "Status",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title=sheet_name,
+            rows=250,
+            cols=len(columns),
+        )
+
+        rows = []
+
+        for preview in previews:
+            if preview.get("status") != "PREVIEW READY":
+                continue
+
+            strategy = str(
+                preview.get("strategy", "")
+            ).strip()
+
+            symbol = str(
+                preview.get("symbol", "")
+            ).strip().upper()
+
+            entry = preview.get(
+                "entry",
+                "",
+            )
+
+            exit_value = preview.get(
+                "exit",
+                "",
+            )
+
+            quantity = preview.get(
+                "quantity",
+                "",
+            )
+
+            preview_time = str(
+                preview.get(
+                    "time",
+                    "",
+                )
+            ).strip()
+
+            rows.append([
+                preview_time,
+                strategy,
+                symbol,
+                entry,
+                exit_value,
+                quantity,
+                "PREVIEW READY",
+            ])
+
+        worksheet.clear()
+
+        table = [
+            columns,
+            *rows,
+        ]
+
+        last_column = "G"
+
+        worksheet.resize(
+            rows=max(250, len(table) + 20),
+            cols=len(columns),
+        )
+
+        worksheet.update(
+            range_name=(
+                f"A1:{last_column}{len(table)}"
+            ),
+            values=table,
+            value_input_option="USER_ENTERED",
+        )
+
+        self.format_worksheet(
+            worksheet
+        )
+
+        print(
+            f"{len(rows)} current-day preview row(s) "
+            f"written to the {sheet_name} sheet "
+            f"for {date_str}."
+        )
+
     def write_orders(
             self,
             date_str: str,
