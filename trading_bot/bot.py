@@ -502,6 +502,74 @@ class TradingBot:
             source=source,
         )
 
+    @staticmethod
+    def _notify_webull_daily_pnl(
+            summary,
+    ) -> None:
+        """
+        Show a macOS notification after Webull daily P&L
+        has been calculated and written successfully.
+
+        Notification failure never interrupts the P&L workflow.
+        """
+        pnl = float(summary.realized_pnl)
+
+        pnl_text = (
+            f"+${pnl:.2f}"
+            if pnl > 0
+            else (
+                f"-${abs(pnl):.2f}"
+                if pnl < 0
+                else "$0.00"
+            )
+        )
+
+        title = "Webull Daily P&L Updated"
+
+        message = (
+            f"{summary.date} · "
+            f"{summary.closed_trades} closed trades · "
+            f"{summary.winning_trades} wins · "
+            f"{summary.losing_trades} losses · "
+            f"P&L {pnl_text}"
+        )
+
+        safe_title = (
+            title
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+        )
+
+        safe_message = (
+            message
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+        )
+
+        script = (
+            'display notification '
+            f'"{safe_message}" '
+            f'with title "{safe_title}"'
+        )
+
+        try:
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    script,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception as error:
+            print(
+                "WARNING: Webull P&L notification "
+                f"failed: {error}"
+            )
+
     def write_webull_daily_pnl(
             self,
             date_str: str,
@@ -551,6 +619,10 @@ class TradingBot:
 
         self.trading_sheets.write_webull_pnl_summary(
             summary=summary,
+        )
+
+        self._notify_webull_daily_pnl(
+            summary
         )
 
         print()
