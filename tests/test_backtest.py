@@ -204,7 +204,7 @@ def test_backtest_writes_exact_missing_bar_diagnostic(
     report = BacktestReport(
         start_date="2026-07-23",
         end_date="2026-07-23",
-        data_feed="sip",
+        data_feed="iex",
     )
     missing = record(
         date_str="2026-07-23",
@@ -219,12 +219,12 @@ def test_backtest_writes_exact_missing_bar_diagnostic(
         BacktestRecord(
             **{
                 **missing.__dict__,
-                "data_feed": "sip",
+                "data_feed": "iex",
                 "missing_timestamps": (
                     "2026-07-23 09:44 ET"
                 ),
                 "missing_bar_classification": (
-                    "NO_VALID_SIP_BAR_RETURNED"
+                    "NO_VALID_IEX_BAR_RETURNED"
                 ),
             }
         )
@@ -243,7 +243,7 @@ def test_backtest_writes_exact_missing_bar_diagnostic(
         "2026-07-23 09:44 ET"
     )
     assert rows[0]["classification"] == (
-        "NO_VALID_SIP_BAR_RETURNED"
+        "NO_VALID_IEX_BAR_RETURNED"
     )
 
 
@@ -340,7 +340,7 @@ def test_main_dispatches_backtest_mode(
             "--output",
             "custom-reports",
             "--feed",
-            "sip",
+            "iex",
         ],
     )
 
@@ -350,7 +350,7 @@ def test_main_dispatches_backtest_mode(
             "2026-07-13",
             "2026-07-24",
             "custom-reports",
-            "sip",
+            "iex",
             0.0,
             0.0,
             0.70,
@@ -419,9 +419,9 @@ def test_range_backtest_isolates_failed_date(
         )
     ]
     assert calls == [
-        ("2026-07-20", 0, False, "sip", 0.0, 0.0),
-        ("2026-07-21", 0, False, "sip", 0.0, 0.0),
-        ("2026-07-22", 0, False, "sip", 0.0, 0.0),
+        ("2026-07-20", 0, False, "iex", 0.0, 0.0),
+        ("2026-07-21", 0, False, "iex", 0.0, 0.0),
+        ("2026-07-22", 0, False, "iex", 0.0, 0.0),
     ]
 
 

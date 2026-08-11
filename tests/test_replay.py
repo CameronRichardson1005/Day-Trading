@@ -116,7 +116,7 @@ def test_replay_uses_only_revealed_opening_bars():
     ]
     assert (
         summary.missing_bar_classification["MISS"]
-        == "NO_VALID_SIP_BAR_RETURNED"
+        == "NO_VALID_IEX_BAR_RETURNED"
     )
 
     assert len(strategy.calls) == 1
@@ -235,10 +235,10 @@ def test_historical_fetch_passes_sip_feed():
         symbols_csv="TEST",
         start_iso="2026-07-23T13:30:00Z",
         end_iso="2026-07-23T13:44:59Z",
-        feed="sip",
+        feed="iex",
     )
 
-    assert captured["feed"] == "sip"
+    assert captured["feed"] == "iex"
 
 
 def test_main_dispatches_replay_mode(
@@ -281,7 +281,7 @@ def test_main_dispatches_replay_mode(
 
     assert main_module.main() == 0
     assert events == [
-        ("2026-07-23", 60.0, "sip"),
+        ("2026-07-23", 60.0, "iex"),
     ]
 
 
@@ -548,7 +548,7 @@ def test_atr_fetch_follows_pagination_and_records_diagnostics():
     result = client.get_previous_day_ranges_all(
         symbols_csv="BBAI",
         date_str="2026-07-24",
-        feed="sip",
+        feed="iex",
     )
 
     assert requested_tokens == [None, "NEXT"]

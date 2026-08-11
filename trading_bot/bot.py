@@ -900,13 +900,18 @@ class TradingBot:
                 if isinstance(bars, list)
             )
 
-            print(
-                f"Merging {streamed_count} WebSocket bar(s)..."
-            )
+            if streamed_count > 0:
+                print(
+                    f"Merging {streamed_count} WebSocket bar(s)..."
+                )
 
-            self.tracker.merge_stream_bars(
-                streamed_bars=streamed_bars,
-            )
+                self.tracker.merge_stream_bars(
+                    streamed_bars=streamed_bars,
+                )
+            else:
+                print(
+                    "No WebSocket bars were available to merge."
+                )
 
             print(
                 "WebSocket bars merged successfully."

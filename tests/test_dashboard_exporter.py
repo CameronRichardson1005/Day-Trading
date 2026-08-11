@@ -41,7 +41,7 @@ def test_complete_invest_includes_levels():
     )
 
     assert payload["status"] == "COMPLETE"
-    assert payload["dataFeed"] == "SIP"
+    assert payload["dataFeed"] == "IEX"
     assert payload["symbols"][0]["signal"] == "INVEST"
     assert payload["symbols"][0]["levels"] == {
         "buy": 9.0,
@@ -178,7 +178,7 @@ def test_publish_uses_read_only_endpoint_contract():
         ),
     }
     assert calls[0][1]["timeout"] == (5, 15)
-    assert calls[0][1]["json"]["dataFeed"] == "SIP"
+    assert calls[0][1]["json"]["dataFeed"] == "IEX"
 
 
 def test_complete_invest_includes_outcome():
@@ -480,7 +480,7 @@ def test_fibonacci_monitor_source_is_supported():
         processed_bars={
             "OPEN": 38,
         },
-        data_feed="sip",
+        data_feed="iex",
         run_mode="SCHEDULED",
     )
 
@@ -501,7 +501,7 @@ def test_fibonacci_final_source_is_supported():
         processed_bars={
             "OPEN": 90,
         },
-        data_feed="sip",
+        data_feed="iex",
     )
 
     assert payload["source"] == (
@@ -519,7 +519,7 @@ def test_fibonacci_strategy_metadata_is_exported():
         processed_bars={
             "OPEN": 38,
         },
-        data_feed="sip",
+        data_feed="iex",
     )
 
     strategy = payload["symbols"][0]["strategy"]
@@ -546,7 +546,7 @@ def test_fibonacci_rules_replace_manipulation_rules():
         processed_bars={
             "OPEN": 38,
         },
-        data_feed="sip",
+        data_feed="iex",
     )
 
     labels = [
@@ -578,7 +578,7 @@ def test_fibonacci_rejection_reason_is_exported():
         source="LIVE_FIBONACCI",
         stocks={"OPEN": stock},
         processed_bars={"OPEN": 38},
-        data_feed="sip",
+        data_feed="iex",
     )
 
     symbol = payload["symbols"][0]
@@ -601,7 +601,7 @@ def test_more_than_fifteen_bars_remains_complete():
         processed_bars={
             "OPEN": 45,
         },
-        data_feed="sip",
+        data_feed="iex",
     )
 
     symbol = payload["symbols"][0]
@@ -627,7 +627,7 @@ def test_fibonacci_webull_preview_never_reports_submitted():
         source="LIVE_FIBONACCI",
         stocks={"OPEN": stock},
         processed_bars={"OPEN": 38},
-        data_feed="sip",
+        data_feed="iex",
     )
 
     preview = payload["symbols"][0]["webullPreview"]

@@ -38,7 +38,7 @@ def test_market_data_uses_requested_symbols():
     assert list(results) == ["AAA", "BBB"]
     assert results["AAA"] is not None
     assert results["BBB"] is not None
-    assert captured["params"]["feed"] == "sip"
+    assert captured["params"]["feed"] == "iex"
 
 
 @pytest.mark.parametrize(
