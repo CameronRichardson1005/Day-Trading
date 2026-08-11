@@ -43,6 +43,8 @@ from .fibonacci_retracement import (
     stopped_out_then_target,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
+from .quick_flip_monitor import QuickFlipMonitor
+from .quick_flip_strategy import QuickFlipCandle
 
 from .backtest import (
     BacktestReport,
@@ -112,6 +114,16 @@ class TradingBot:
 
         # Separate active paper/preview Fibonacci adapter.
         self.fibonacci_strategy = Fibonacci618Strategy()
+
+        # Quick Flip remains completely independent from the
+        # Stock fields used by the preserved Manipulation strategy.
+        #
+        # Quick Flip results are stored by symbol so running it
+        # cannot overwrite Manipulation signal, entry, target,
+        # or stop-loss values.
+        self.quick_flip_monitor = QuickFlipMonitor()
+        self.quick_flip_results = {}
+        self.quick_flip_status = {}
 
         self.scanner = StockScanner(
             current_symbols=TICKERS,
@@ -3882,6 +3894,333 @@ class TradingBot:
                     f"{symbol}: manipulation strategy "
                     f"evaluation failed: {error}"
                 )
+
+    @staticmethod
+    def _quick_flip_candle_from_bar(
+            bar: dict,
+    ) -> QuickFlipCandle:
+        """
+        Convert one Alpaca OHLC bar into the immutable candle
+        representation used by Quick Flip.
+
+        This conversion performs no strategy evaluation.
+        """
+        timestamp_text = str(
+            bar["t"]
+        ).strip()
+
+        if timestamp_text.endswith("Z"):
+            timestamp_text = (
+                timestamp_text[:-1] + "+00:00"
+            )
+
+        return QuickFlipCandle(
+            timestamp=datetime.fromisoformat(
+                timestamp_text
+            ),
+            open=float(bar["o"]),
+            high=float(bar["h"]),
+            low=float(bar["l"]),
+            close=float(bar["c"]),
+            volume=float(
+                bar.get("v", 0) or 0
+            ),
+        )
+
+    def _calculate_quick_flip_strategy(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> dict:
+        """
+        Evaluate Quick Flip independently of Manipulation.
+
+        Quick Flip:
+        - uses the completed 09:30-09:45 opening candle;
+        - compares that candle with Wilder ATR14;
+        - watches completed 5-minute candles from 09:45;
+        - stops accepting new setups at 11:00 ET;
+        - stores results separately from Stock.signal;
+        - never creates a stop-loss value;
+        - never submits an order.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        monitor_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=45),
+            tzinfo=eastern,
+        )
+
+        monitor_cutoff = datetime.combine(
+            trading_date,
+            time(hour=11, minute=0),
+            tzinfo=eastern,
+        )
+
+        if evaluation_end is None:
+            normalized_end = monitor_cutoff
+        else:
+            normalized_end = evaluation_end
+
+            if normalized_end.tzinfo is None:
+                normalized_end = (
+                    normalized_end.replace(
+                        tzinfo=eastern,
+                    )
+                )
+            else:
+                normalized_end = (
+                    normalized_end.astimezone(
+                        eastern
+                    )
+                )
+
+            if normalized_end > monitor_cutoff:
+                normalized_end = monitor_cutoff
+
+        self.quick_flip_results = {}
+        self.quick_flip_status = {}
+
+        opening_bars = (
+            self.alpaca.get_opening_15min_bars(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        bars_by_symbol = {
+            symbol: []
+            for symbol in self.stocks
+        }
+
+        if normalized_end > monitor_start:
+            start_utc = (
+                monitor_start
+                .astimezone(utc)
+            )
+
+            end_utc = (
+                normalized_end
+                .astimezone(utc)
+            )
+
+            bars_by_symbol = (
+                self.alpaca
+                .get_historical_1min_bars(
+                    symbols_csv=self.symbols_csv,
+                    start_iso=start_utc.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    end_iso=end_utc.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    feed=data_feed,
+                )
+            )
+
+        cutoff_reached = (
+            normalized_end >= monitor_cutoff
+        )
+
+        for symbol in self.stocks:
+            opening_bar = opening_bars.get(
+                symbol
+            )
+
+            atr_14 = atrs.get(
+                symbol
+            )
+
+            if opening_bar is None:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "MISSING_OPENING_BAR"
+
+                print(
+                    f"{symbol}: Quick Flip skipped "
+                    "because the opening 15-minute "
+                    "bar was unavailable."
+                )
+
+                continue
+
+            if atr_14 is None:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "MISSING_ATR14"
+
+                print(
+                    f"{symbol}: Quick Flip skipped "
+                    "because ATR14 was unavailable."
+                )
+
+                continue
+
+            try:
+                opening_candle = (
+                    self._quick_flip_candle_from_bar(
+                        opening_bar
+                    )
+                )
+
+                result = (
+                    self.quick_flip_monitor
+                    .evaluate_minute_bars(
+                        symbol=symbol,
+                        opening_bar=opening_candle,
+                        atr_14=float(atr_14),
+                        minute_bars=(
+                            bars_by_symbol.get(
+                                symbol,
+                                [],
+                            )
+                        ),
+                        evaluation_end=(
+                            normalized_end
+                            .astimezone(utc)
+                        ),
+                        cutoff_reached=(
+                            cutoff_reached
+                        ),
+                    )
+                )
+
+                self.quick_flip_results[
+                    symbol
+                ] = result
+
+                self.quick_flip_status[
+                    symbol
+                ] = result.status
+
+            except Exception as error:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "EVALUATION_FAILED"
+
+                print(
+                    f"{symbol}: Quick Flip "
+                    f"evaluation failed: {error}"
+                )
+
+        return dict(
+            self.quick_flip_results
+        )
+
+    def calculate_parallel_strategies(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> dict:
+        """
+        Evaluate Manipulation and Quick Flip independently.
+
+        Manipulation continues to own the legacy Stock strategy
+        fields.
+
+        Quick Flip writes only to self.quick_flip_results and
+        self.quick_flip_status.
+
+        Therefore one strategy cannot overwrite the other's
+        signal state.
+        """
+        print()
+        print(
+            "Running Manipulation + Quick Flip "
+            "in parallel..."
+        )
+
+        self._calculate_manipulation_strategy(
+            date_str=date_str,
+        )
+
+        quick_flip_results = (
+            self._calculate_quick_flip_strategy(
+                date_str=date_str,
+                evaluation_end=evaluation_end,
+                data_feed=data_feed,
+            )
+        )
+
+        manipulation_invest = [
+            symbol
+            for symbol, stock
+            in self.stocks.items()
+            if stock.signal == "INVEST"
+        ]
+
+        quick_flip_invest = [
+            symbol
+            for symbol, result
+            in quick_flip_results.items()
+            if (
+                result is not None
+                and result.signal is not None
+                and result.signal.signal
+                == "INVEST"
+            )
+        ]
+
+        print(
+            "Manipulation INVEST:",
+            (
+                ", ".join(
+                    manipulation_invest
+                )
+                if manipulation_invest
+                else "None"
+            ),
+        )
+
+        print(
+            "Quick Flip INVEST:",
+            (
+                ", ".join(
+                    quick_flip_invest
+                )
+                if quick_flip_invest
+                else "None"
+            ),
+        )
+
+        return {
+            "manipulation": (
+                manipulation_invest
+            ),
+            "quick_flip": (
+                quick_flip_invest
+            ),
+        }
 
     def _set_fibonacci_performance_metric(
             self,
