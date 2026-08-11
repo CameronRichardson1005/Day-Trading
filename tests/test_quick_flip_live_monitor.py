@@ -598,3 +598,159 @@ def test_same_quick_flip_signal_is_previewed_once():
         ["submitted"]
         is False
     )
+
+
+def test_quick_flip_preview_ready_sends_one_macos_notification(
+    monkeypatch,
+):
+    from datetime import datetime
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from trading_bot.bot import TradingBot
+    from trading_bot.models import Stock
+
+    eastern = ZoneInfo("America/New_York")
+
+    bot = object.__new__(TradingBot)
+
+    bot.stocks = {
+        "OPEN": Stock(symbol="OPEN"),
+    }
+    bot.symbols_csv = "OPEN"
+
+    class FakeAlpaca:
+        def get_opening_15min_bars(
+            self,
+            symbols_csv,
+            date_str,
+            feed,
+        ):
+            return {
+                "OPEN": {
+                    "t": "2026-08-11T13:30:00Z",
+                    "o": 10.0,
+                    "h": 11.0,
+                    "l": 9.0,
+                    "c": 9.5,
+                }
+            }
+
+        def get_previous_day_ranges_all(
+            self,
+            symbols_csv,
+            date_str,
+            feed,
+        ):
+            return {
+                "OPEN": 1.0,
+            }
+
+        def get_historical_1min_bars(
+            self,
+            symbols_csv,
+            start_iso,
+            end_iso,
+            feed,
+        ):
+            return {
+                "OPEN": []
+            }
+
+    bot.alpaca = FakeAlpaca()
+
+    signal = SimpleNamespace(
+        signal="INVEST",
+        pattern="HAMMER",
+        entry_price=9.25,
+        take_profit_1=10.0,
+        take_profit_2=11.0,
+        reversal_time="2026-08-11T13:50:00Z",
+        confirmation_time="2026-08-11T13:55:00Z",
+    )
+
+    class FakeMonitor:
+        def evaluate_minute_bars(
+            self,
+            **kwargs,
+        ):
+            return SimpleNamespace(
+                status="CONFIRMED",
+                signal=signal,
+            )
+
+    bot.quick_flip_monitor = FakeMonitor()
+    bot.quick_flip_results = {}
+    bot.quick_flip_status = {}
+
+    class FakePreviewService:
+        def prepare_previews(
+            self,
+            results,
+        ):
+            return [
+                {
+                    "status": "PREVIEW READY",
+                    "submitted": False,
+                    "symbol": "OPEN",
+                    "quantity": 10,
+                    "limitBuy": 9.25,
+                    "takeProfit1": 10.0,
+                    "takeProfit2": 11.0,
+                }
+            ]
+
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(
+            (args, kwargs)
+        )
+
+        return SimpleNamespace(
+            returncode=0
+        )
+
+    monkeypatch.setattr(
+        "trading_bot.bot.subprocess.run",
+        fake_run,
+    )
+
+    times = iter([
+        datetime(
+            2026, 8, 11,
+            9, 46,
+            tzinfo=eastern,
+        ),
+        datetime(
+            2026, 8, 11,
+            9, 46,
+            tzinfo=eastern,
+        ),
+        datetime(
+            2026, 8, 11,
+            11, 0,
+            tzinfo=eastern,
+        ),
+    ])
+
+    bot.run_quick_flip_monitor(
+        date_str="2026-08-11",
+        now_fn=lambda: next(times),
+        sleep_fn=lambda seconds: None,
+        data_feed="iex",
+        stream_factory=None,
+        preview_service_factory=(
+            FakePreviewService
+        ),
+    )
+
+    assert len(calls) == 1
+
+    command = calls[0][0][0]
+
+    assert command[0] == "osascript"
+    assert "OPEN" in command[-1]
+    assert "9.2500" in command[-1]
+    assert "10.0000" in command[-1]
+    assert "11.0000" in command[-1]

@@ -1,6 +1,7 @@
 import csv
 import os
 import time as time_module
+import subprocess
 
 from contextlib import redirect_stdout
 from dataclasses import asdict
@@ -1115,6 +1116,88 @@ class TradingBot:
                 ),
             )
 
+        def notify_quick_flip_preview(
+                preview,
+        ) -> None:
+            """
+            Show a macOS desktop notification for a newly
+            created Quick Flip Webull preview.
+
+            Notification failure never interrupts trading
+            strategy monitoring.
+            """
+            if preview.get("status") != "PREVIEW READY":
+                return
+
+            symbol = str(
+                preview.get("symbol", "")
+            )
+
+            quantity = int(
+                preview.get("quantity", 0)
+            )
+
+            entry = float(
+                preview.get("limitBuy", 0)
+            )
+
+            tp1 = float(
+                preview.get("takeProfit1", 0)
+            )
+
+            tp2 = float(
+                preview.get("takeProfit2", 0)
+            )
+
+            title = (
+                "Quick Flip Webull Preview Ready"
+            )
+
+            message = (
+                f"{symbol} · {quantity} shares · "
+                f"Entry ${entry:.4f} · "
+                f"TP1 ${tp1:.4f} · "
+                f"TP2 ${tp2:.4f}"
+            )
+
+            # Escape values for AppleScript strings.
+            safe_title = (
+                title
+                .replace("\\", "\\\\")
+                .replace('"', '\\"')
+            )
+
+            safe_message = (
+                message
+                .replace("\\", "\\\\")
+                .replace('"', '\\"')
+            )
+
+            script = (
+                'display notification '
+                f'"{safe_message}" '
+                f'with title "{safe_title}"'
+            )
+
+            try:
+                subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        script,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip macOS "
+                    "notification failed: "
+                    f"{error}"
+                )
+
         def prepare_new_quick_flip_previews():
             if preview_service is None:
                 return []
@@ -1210,6 +1293,10 @@ class TradingBot:
                         f"${preview['takeProfit2']:.4f} · "
                         "NO AUTOMATIC STOP · "
                         "NOT SUBMITTED"
+                    )
+
+                    notify_quick_flip_preview(
+                        preview
                     )
                 else:
                     print(
