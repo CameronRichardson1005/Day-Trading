@@ -1,6 +1,6 @@
 import json
 from datetime import UTC, datetime
-from threading import Event
+from threading import Event, Lock
 from typing import Any, Callable
 
 from websockets.sync.client import connect
@@ -14,6 +14,10 @@ class AlpacaStockStream:
 
     The collector stores one latest bar per symbol and timestamp.
     An updated bar replaces the earlier version of that same minute.
+
+    Snapshot reads are thread-safe so the Quick Flip monitor can
+    inspect bars while collect_until() continues on a background
+    thread.
     """
 
     VALID_FEEDS = {"iex", "sip"}
@@ -42,7 +46,10 @@ class AlpacaStockStream:
                 "At least one WebSocket symbol is required."
             )
 
-        self.symbols = list(dict.fromkeys(cleaned_symbols))
+        self.symbols = list(
+            dict.fromkeys(cleaned_symbols)
+        )
+
         self.feed = feed
         self.connect_fn = connect_fn
 
@@ -59,8 +66,14 @@ class AlpacaStockStream:
             for symbol in self.symbols
         }
 
+        # collect_until() may run in a background thread while
+        # Quick Flip reads snapshots from the monitoring thread.
+        self._bars_lock = Lock()
+
     @staticmethod
-    def _normalise_timestamp(value: Any) -> str:
+    def _normalise_timestamp(
+        value: Any,
+    ) -> str:
         return str(value or "")
 
     def process_message(
@@ -72,37 +85,58 @@ class AlpacaStockStream:
 
         Returns True when a bar or updated bar was accepted.
         """
-        message_type = str(message.get("T", ""))
+        message_type = str(
+            message.get("T", "")
+        )
 
         if message_type not in {"b", "u"}:
             return False
 
-        symbol = str(message.get("S", "")).upper()
+        symbol = str(
+            message.get("S", "")
+        ).upper()
+
         timestamp = self._normalise_timestamp(
             message.get("t")
         )
 
-        if symbol not in self.bars or not timestamp:
+        if (
+            symbol not in self.bars
+            or not timestamp
+        ):
             return False
 
-        required_fields = ("o", "h", "l", "c")
+        required_fields = (
+            "o",
+            "h",
+            "l",
+            "c",
+        )
 
         if not all(
-            isinstance(message.get(field), (int, float))
+            isinstance(
+                message.get(field),
+                (int, float),
+            )
             for field in required_fields
         ):
             return False
 
         bar = {
             key: value
-            for key, value in message.items()
+            for key, value
+            in message.items()
             if key not in {"T", "S"}
         }
 
-        # Preserve the structure used elsewhere in the bot.
+        # Preserve the same structure used elsewhere.
         bar["t"] = timestamp
 
-        self.bars[symbol][timestamp] = bar
+        with self._bars_lock:
+            self.bars[
+                symbol
+            ][timestamp] = bar
+
         return True
 
     def bars_for_symbol(
@@ -111,19 +145,50 @@ class AlpacaStockStream:
     ) -> list[dict[str, Any]]:
         symbol = symbol.strip().upper()
 
+        with self._bars_lock:
+            bars = {
+                timestamp: dict(bar)
+                for timestamp, bar
+                in self.bars.get(
+                    symbol,
+                    {},
+                ).items()
+            }
+
         return [
-            self.bars[symbol][timestamp]
-            for timestamp in sorted(
-                self.bars.get(symbol, {})
-            )
+            bars[timestamp]
+            for timestamp in sorted(bars)
         ]
 
     def snapshot(
         self,
     ) -> dict[str, list[dict[str, Any]]]:
+        """
+        Return an independent chronological copy of all bars.
+
+        Mutating the returned snapshot cannot alter the live
+        stream collector's internal state.
+        """
+        with self._bars_lock:
+            snapshot = {
+                symbol: {
+                    timestamp: dict(bar)
+                    for timestamp, bar
+                    in self.bars.get(
+                        symbol,
+                        {},
+                    ).items()
+                }
+                for symbol in self.symbols
+            }
+
         return {
-            symbol: self.bars_for_symbol(symbol)
-            for symbol in self.symbols
+            symbol: [
+                bars[timestamp]
+                for timestamp in sorted(bars)
+            ]
+            for symbol, bars
+            in snapshot.items()
         }
 
     def collect_until(
@@ -132,11 +197,15 @@ class AlpacaStockStream:
         stop_event: Event | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """
-        Connect, authenticate, subscribe, and collect bars until stop_time.
+        Connect, authenticate, subscribe, and collect bars
+        until stop_time.
 
-        stop_time must be a naive UTC datetime, matching the live tracker.
+        stop_time must be a naive UTC datetime, matching
+        the existing live tracker convention.
         """
-        external_stop = stop_event or Event()
+        external_stop = (
+            stop_event or Event()
+        )
 
         with self.connect_fn(
             self.url,
@@ -145,15 +214,19 @@ class AlpacaStockStream:
             ping_timeout=20,
             close_timeout=5,
         ) as websocket:
-            connected = json.loads(websocket.recv())
+            connected = json.loads(
+                websocket.recv()
+            )
 
             if not any(
                 item.get("T") == "success"
-                and item.get("msg") == "connected"
+                and item.get("msg")
+                == "connected"
                 for item in connected
             ):
                 raise RuntimeError(
-                    "Alpaca WebSocket did not confirm connection."
+                    "Alpaca WebSocket did not "
+                    "confirm connection."
                 )
 
             websocket.send(
@@ -166,15 +239,19 @@ class AlpacaStockStream:
                 )
             )
 
-            authenticated = json.loads(websocket.recv())
+            authenticated = json.loads(
+                websocket.recv()
+            )
 
             if not any(
                 item.get("T") == "success"
-                and item.get("msg") == "authenticated"
+                and item.get("msg")
+                == "authenticated"
                 for item in authenticated
             ):
                 raise RuntimeError(
-                    "Alpaca WebSocket authentication failed."
+                    "Alpaca WebSocket "
+                    "authentication failed."
                 )
 
             websocket.send(
@@ -188,7 +265,9 @@ class AlpacaStockStream:
             )
 
             while (
-                datetime.now(UTC).replace(tzinfo=None) < stop_time
+                datetime.now(UTC)
+                .replace(tzinfo=None)
+                < stop_time
                 and not external_stop.is_set()
             ):
                 try:
@@ -198,13 +277,23 @@ class AlpacaStockStream:
                 except TimeoutError:
                     continue
 
-                messages = json.loads(raw_message)
+                messages = json.loads(
+                    raw_message
+                )
 
-                if not isinstance(messages, list):
+                if not isinstance(
+                    messages,
+                    list,
+                ):
                     continue
 
                 for message in messages:
-                    if isinstance(message, dict):
-                        self.process_message(message)
+                    if isinstance(
+                        message,
+                        dict,
+                    ):
+                        self.process_message(
+                            message
+                        )
 
         return self.snapshot()
