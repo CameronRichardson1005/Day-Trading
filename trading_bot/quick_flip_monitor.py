@@ -34,6 +34,50 @@ def _parse_bar_timestamp(value: object) -> datetime:
     return datetime.fromisoformat(text)
 
 
+
+def reconcile_minute_bars(
+    existing_bars: Iterable[dict],
+    fetched_bars: Iterable[dict],
+) -> list[dict]:
+    """
+    Reconcile completed one-minute bars by Alpaca timestamp.
+
+    Existing bars provide the current local history.
+
+    The later reconciliation fetch is authoritative for any
+    timestamp it also contains, so corrected OHLCV values replace
+    the earlier version.
+
+    Missing minutes are never fabricated.
+
+    The returned history is always chronological.
+    """
+    unique_bars: dict[str, dict] = {}
+
+    for bar in existing_bars:
+        timestamp = str(
+            bar.get("t", "")
+        ).strip()
+
+        if timestamp:
+            unique_bars[timestamp] = dict(bar)
+
+    # Reconciliation fetch comes second deliberately.
+    # A later Alpaca representation replaces an older
+    # representation for the same completed minute.
+    for bar in fetched_bars:
+        timestamp = str(
+            bar.get("t", "")
+        ).strip()
+
+        if timestamp:
+            unique_bars[timestamp] = dict(bar)
+
+    return [
+        unique_bars[timestamp]
+        for timestamp in sorted(unique_bars)
+    ]
+
 def aggregate_completed_5m_candles(
     minute_bars: Iterable[dict],
     *,

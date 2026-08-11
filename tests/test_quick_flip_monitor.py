@@ -522,3 +522,211 @@ def test_monitor_has_no_stop_loss_behavior():
         result.signal,
         "stop_loss",
     )
+
+
+def test_reconciliation_deduplicates_timestamp():
+    from trading_bot.quick_flip_monitor import (
+        reconcile_minute_bars,
+    )
+
+    original = {
+        "t": "2026-08-11T13:45:00Z",
+        "o": 10.00,
+        "h": 10.20,
+        "l": 9.90,
+        "c": 10.10,
+        "v": 100,
+    }
+
+    result = reconcile_minute_bars(
+        [original],
+        [dict(original)],
+    )
+
+    assert len(result) == 1
+
+
+def test_reconciliation_later_fetch_replaces_old_bar():
+    from trading_bot.quick_flip_monitor import (
+        reconcile_minute_bars,
+    )
+
+    earlier = {
+        "t": "2026-08-11T13:45:00Z",
+        "o": 10.00,
+        "h": 10.20,
+        "l": 9.90,
+        "c": 10.10,
+        "v": 100,
+    }
+
+    corrected = {
+        "t": "2026-08-11T13:45:00Z",
+        "o": 10.00,
+        "h": 10.35,
+        "l": 9.88,
+        "c": 10.30,
+        "v": 175,
+    }
+
+    result = reconcile_minute_bars(
+        [earlier],
+        [corrected],
+    )
+
+    assert len(result) == 1
+    assert result[0]["h"] == 10.35
+    assert result[0]["l"] == 9.88
+    assert result[0]["c"] == 10.30
+    assert result[0]["v"] == 175
+
+
+def test_reconciliation_adds_late_missing_minute():
+    from trading_bot.quick_flip_monitor import (
+        reconcile_minute_bars,
+    )
+
+    minute_45 = {
+        "t": "2026-08-11T13:45:00Z",
+        "o": 10.00,
+        "h": 10.20,
+        "l": 9.90,
+        "c": 10.10,
+    }
+
+    minute_47 = {
+        "t": "2026-08-11T13:47:00Z",
+        "o": 10.20,
+        "h": 10.30,
+        "l": 10.10,
+        "c": 10.25,
+    }
+
+    late_minute_46 = {
+        "t": "2026-08-11T13:46:00Z",
+        "o": 10.10,
+        "h": 10.25,
+        "l": 10.05,
+        "c": 10.20,
+    }
+
+    result = reconcile_minute_bars(
+        [
+            minute_45,
+            minute_47,
+        ],
+        [
+            late_minute_46,
+        ],
+    )
+
+    assert [
+        bar["t"]
+        for bar in result
+    ] == [
+        "2026-08-11T13:45:00Z",
+        "2026-08-11T13:46:00Z",
+        "2026-08-11T13:47:00Z",
+    ]
+
+
+def test_reconciliation_does_not_fabricate_missing_minute():
+    from trading_bot.quick_flip_monitor import (
+        reconcile_minute_bars,
+    )
+
+    result = reconcile_minute_bars(
+        [
+            {
+                "t": "2026-08-11T13:45:00Z",
+                "o": 10,
+                "h": 11,
+                "l": 9,
+                "c": 10,
+            }
+        ],
+        [
+            {
+                "t": "2026-08-11T13:47:00Z",
+                "o": 10,
+                "h": 11,
+                "l": 9,
+                "c": 10,
+            }
+        ],
+    )
+
+    assert len(result) == 2
+
+    assert all(
+        bar["t"]
+        != "2026-08-11T13:46:00Z"
+        for bar in result
+    )
+
+
+def test_five_minute_candle_requires_reconciled_complete_set():
+    from trading_bot.quick_flip_monitor import (
+        aggregate_completed_5m_candles,
+        reconcile_minute_bars,
+    )
+
+    existing = [
+        minute_bar(
+            45,
+            open_price=10.00,
+            high=10.20,
+            low=9.90,
+            close=10.10,
+        ),
+        minute_bar(
+            46,
+            open_price=10.10,
+            high=10.25,
+            low=10.05,
+            close=10.20,
+        ),
+        minute_bar(
+            48,
+            open_price=10.20,
+            high=10.35,
+            low=10.15,
+            close=10.30,
+        ),
+        minute_bar(
+            49,
+            open_price=10.30,
+            high=10.40,
+            low=10.25,
+            close=10.35,
+        ),
+    ]
+
+    # Missing 13:47 means no 5-minute candle yet.
+    assert (
+        aggregate_completed_5m_candles(
+            existing
+        )
+        == []
+    )
+
+    late_47 = minute_bar(
+        47,
+        open_price=10.20,
+        high=10.30,
+        low=10.10,
+        close=10.25,
+    )
+
+    reconciled = reconcile_minute_bars(
+        existing,
+        [late_47],
+    )
+
+    candles = (
+        aggregate_completed_5m_candles(
+            reconciled
+        )
+    )
+
+    assert len(candles) == 1

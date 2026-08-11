@@ -43,7 +43,10 @@ from .fibonacci_retracement import (
     stopped_out_then_target,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
-from .quick_flip_monitor import QuickFlipMonitor
+from .quick_flip_monitor import (
+    QuickFlipMonitor,
+    reconcile_minute_bars,
+)
 from .quick_flip_strategy import QuickFlipCandle
 
 from .backtest import (
@@ -955,11 +958,6 @@ class TradingBot:
             for symbol in self.stocks
         }
 
-        seen_timestamps = {
-            symbol: set()
-            for symbol in self.stocks
-        }
-
         fetch_start = monitor_start
         last_signature = None
 
@@ -1117,43 +1115,16 @@ class TradingBot:
                     continue
 
                 for symbol in self.stocks:
-                    for bar in fetched.get(
-                        symbol,
-                        [],
-                    ):
-                        timestamp = str(
-                            bar.get("t", "")
-                        )
-
-                        if not timestamp:
-                            continue
-
-                        if (
-                            timestamp
-                            in seen_timestamps[
-                                symbol
-                            ]
-                        ):
-                            continue
-
-                        seen_timestamps[
-                            symbol
-                        ].add(
-                            timestamp
-                        )
-
-                        intraday_bars[
-                            symbol
-                        ].append(
-                            dict(bar)
-                        )
-
                     intraday_bars[
                         symbol
-                    ].sort(
-                        key=lambda bar: str(
-                            bar["t"]
-                        )
+                    ] = reconcile_minute_bars(
+                        intraday_bars[
+                            symbol
+                        ],
+                        fetched.get(
+                            symbol,
+                            [],
+                        ),
                     )
 
                 fetch_start = evaluation_end
@@ -1270,41 +1241,16 @@ class TradingBot:
                 )
 
                 for symbol in self.stocks:
-                    for bar in final_fetch.get(
-                        symbol,
-                        [],
-                    ):
-                        timestamp = str(
-                            bar.get("t", "")
-                        )
-
-                        if (
-                            not timestamp
-                            or timestamp
-                            in seen_timestamps[
-                                symbol
-                            ]
-                        ):
-                            continue
-
-                        seen_timestamps[
-                            symbol
-                        ].add(
-                            timestamp
-                        )
-
-                        intraday_bars[
-                            symbol
-                        ].append(
-                            dict(bar)
-                        )
-
                     intraday_bars[
                         symbol
-                    ].sort(
-                        key=lambda bar: str(
-                            bar["t"]
-                        )
+                    ] = reconcile_minute_bars(
+                        intraday_bars[
+                            symbol
+                        ],
+                        final_fetch.get(
+                            symbol,
+                            [],
+                        ),
                     )
 
             except Exception as error:
