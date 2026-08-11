@@ -76,6 +76,11 @@ from .config import (
 )
 from .dashboard_exporter import DashboardExporter
 from .models import Stock
+from .webull_trade_history import (
+    WebullTradeHistoryClient,
+    calculate_fifo_realized_trades,
+    summarize_realized_trades,
+)
 from .webull_safety import WebullOrderProposal
 from .webull_paper_order_service import (
     WebullPaperOrderService,
@@ -496,6 +501,88 @@ class TradingBot:
             data_feed=data_feed,
             source=source,
         )
+
+    def write_webull_daily_pnl(
+            self,
+            date_str: str,
+            history_client=None,
+    ):
+        """
+        Read Webull order history and write realized daily P&L
+        to the separate trading workbook.
+
+        READ ONLY:
+        - no order submission
+        - no order cancellation
+        - no order replacement
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        client = (
+            history_client
+            if history_client is not None
+            else WebullTradeHistoryClient()
+        )
+
+        fills = client.get_recent_fills()
+
+        trades, remaining = (
+            calculate_fifo_realized_trades(
+                fills,
+                date_str,
+            )
+        )
+
+        summary = summarize_realized_trades(
+            trades,
+            date_str,
+        )
+
+        self.trading_sheets.write_webull_trade_pnl(
+            date_str=date_str,
+            trades=trades,
+            remaining=remaining,
+        )
+
+        self.trading_sheets.write_webull_pnl_summary(
+            summary=summary,
+        )
+
+        print()
+        print("===================================")
+        print(" Webull Daily Trade P&L")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(
+            f"Closed trades: {summary.closed_trades}"
+        )
+        print(
+            f"Winning trades: {summary.winning_trades}"
+        )
+        print(
+            f"Losing trades: {summary.losing_trades}"
+        )
+        print(
+            f"Gross realized P&L: "
+            f"${summary.realized_pnl:.2f}"
+        )
+        print(
+            "Source: READ-ONLY WEBULL ORDER HISTORY"
+        )
+        print(
+            "No broker orders were submitted."
+        )
+
+        return {
+            "trades": trades,
+            "remaining": remaining,
+            "summary": summary,
+        }
 
     def run(self) -> None:
         print("===================================")

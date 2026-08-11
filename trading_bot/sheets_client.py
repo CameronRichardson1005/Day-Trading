@@ -2407,6 +2407,160 @@ class SheetsClient:
             f"reconciled in the {sheet_name} sheet."
         )
 
+    def write_webull_trade_pnl(
+            self,
+            date_str: str,
+            trades: list,
+            remaining: dict[str, float],
+            sheet_name: str = "Daily Trade P&L",
+    ) -> None:
+        """
+        Store realized Webull trade results for one trading date.
+
+        Data is sourced from read-only Webull order history.
+        This method cannot submit, replace, or cancel orders.
+        """
+        from zoneinfo import ZoneInfo
+
+        eastern = ZoneInfo("America/New_York")
+
+        columns = [
+            "Date",
+            "Symbol",
+            "Buy Time ET",
+            "Sell Time ET",
+            "Quantity Closed",
+            "Buy Price",
+            "Sell Price",
+            "Gross Cost",
+            "Gross Proceeds",
+            "Realized P&L",
+            "Return %",
+            "Remaining Open Quantity",
+            "Status",
+            "Source",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title=sheet_name,
+            rows=500,
+            cols=len(columns),
+        )
+
+        rows = []
+
+        for trade in trades:
+            open_quantity = float(
+                remaining.get(
+                    trade.symbol,
+                    0,
+                )
+            )
+
+            rows.append([
+                date_str,
+                trade.symbol,
+                trade.buy_time.astimezone(
+                    eastern
+                ).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                trade.sell_time.astimezone(
+                    eastern
+                ).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                trade.quantity,
+                trade.buy_price,
+                trade.sell_price,
+                trade.gross_cost,
+                trade.gross_proceeds,
+                trade.realized_pnl,
+                trade.return_pct,
+                open_quantity,
+                (
+                    "PARTIALLY CLOSED"
+                    if open_quantity > 0
+                    else "CLOSED"
+                ),
+                "WEBULL ORDER HISTORY",
+            ])
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=rows,
+            last_column="N",
+            sheet_name=sheet_name,
+        )
+
+        print(
+            f"{len(rows)} realized Webull trade row(s) "
+            f"reconciled in the {sheet_name} sheet."
+        )
+
+    def write_webull_pnl_summary(
+            self,
+            summary,
+            sheet_name: str = "Daily P&L Summary",
+    ) -> None:
+        """
+        Store one realized Webull P&L summary for a trading date.
+
+        Values are calculated only from matched filled BUY/SELL
+        quantities returned by read-only Webull history.
+        """
+        columns = [
+            "Date",
+            "Closed Trades",
+            "Winning Trades",
+            "Losing Trades",
+            "Breakeven Trades",
+            "Win Rate %",
+            "Gross Profit",
+            "Gross Loss",
+            "Realized P&L",
+            "Source",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title=sheet_name,
+            rows=500,
+            cols=len(columns),
+        )
+
+        row = [
+            summary.date,
+            summary.closed_trades,
+            summary.winning_trades,
+            summary.losing_trades,
+            summary.breakeven_trades,
+            (
+                ""
+                if summary.win_rate_pct is None
+                else summary.win_rate_pct
+            ),
+            summary.gross_profit,
+            summary.gross_loss,
+            summary.realized_pnl,
+            "WEBULL ORDER HISTORY",
+        ]
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=summary.date,
+            replacement_rows=[row],
+            last_column="J",
+            sheet_name=sheet_name,
+        )
+
+        print(
+            "Webull daily P&L summary reconciled in "
+            f"the {sheet_name} sheet."
+        )
+
     def write_orders(
             self,
             date_str: str,
