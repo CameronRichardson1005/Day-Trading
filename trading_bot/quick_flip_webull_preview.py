@@ -174,3 +174,71 @@ def quick_flip_preview_payload(
             "USD",
         ),
     }
+
+
+class QuickFlipWebullPreviewClient(
+    WebullPreviewClient
+):
+    """
+    Webull preview-only client for Quick Flip.
+
+    This class calls Webull's preview_order endpoint only.
+    It exposes no order submission method.
+    """
+
+    def preview(
+        self,
+        request: QuickFlipWebullPreviewRequest,
+    ) -> dict[str, Any]:
+        account_id = self._get_account_id()
+
+        preview_orders = [
+            {
+                "client_order_id": (
+                    request.client_order_id
+                ),
+                "combo_type": "NORMAL",
+                "symbol": request.symbol,
+                "instrument_type": "EQUITY",
+                "market": "US",
+                "order_type": "LIMIT",
+                "limit_price": (
+                    f"{request.limit_price:.4f}"
+                ),
+                "quantity": str(
+                    request.quantity
+                ),
+                "side": "BUY",
+                "time_in_force": "DAY",
+                "support_trading_session": "CORE",
+                "entrust_type": "QTY",
+            }
+        ]
+
+        response = (
+            self._trade_client.order_v2
+            .preview_order(
+                account_id,
+                preview_orders,
+            )
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "Webull Quick Flip preview failed "
+                f"with HTTP {response.status_code}: "
+                f"{response.text}"
+            )
+
+        result = response.json()
+
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                "Webull Quick Flip preview returned "
+                "invalid data."
+            )
+
+        return quick_flip_preview_payload(
+            request=request,
+            webull_result=result,
+        )
