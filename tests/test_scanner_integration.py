@@ -198,6 +198,13 @@ def test_live_scanner_and_dashboard_run_before_tracking(
     bot.refresh_symbols_for_date = fake_refresh
     bot.initialise_sheets = fake_initialise
 
+    # Quick Flip live timing is tested separately.
+    # Prevent this opening-workflow unit test from
+    # entering the real 09:45-11:00 monitor.
+    bot.run_quick_flip_monitor = (
+        lambda **kwargs: None
+    )
+
     bot.run_live_tracker()
 
     assert events == [
@@ -291,6 +298,13 @@ def test_dashboard_failure_does_not_stop_tracking(
 
     bot.refresh_symbols_for_date = fake_refresh
     bot.initialise_sheets = fake_initialise
+
+    # Quick Flip live timing is tested separately.
+    # Prevent this opening-workflow unit test from
+    # entering the real 09:45-11:00 monitor.
+    bot.run_quick_flip_monitor = (
+        lambda **kwargs: None
+    )
 
     bot.run_live_tracker()
 

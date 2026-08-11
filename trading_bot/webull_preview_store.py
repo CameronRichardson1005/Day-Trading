@@ -51,6 +51,8 @@ class WebullPreviewStore:
         optional = {
             "targetPrice",
             "tradingStopPrice",
+            "takeProfit1",
+            "takeProfit2",
             "strategyName",
             "rewardRisk",
             "confirmationTime",
@@ -91,6 +93,12 @@ class WebullPreviewStore:
             raw_stop_price = preview.get(
                 "tradingStopPrice"
             )
+            raw_take_profit_1 = preview.get(
+                "takeProfit1"
+            )
+            raw_take_profit_2 = preview.get(
+                "takeProfit2"
+            )
 
             target_price = (
                 None
@@ -101,6 +109,16 @@ class WebullPreviewStore:
                 None
                 if raw_stop_price is None
                 else float(raw_stop_price)
+            )
+            take_profit_1 = (
+                None
+                if raw_take_profit_1 is None
+                else float(raw_take_profit_1)
+            )
+            take_profit_2 = (
+                None
+                if raw_take_profit_2 is None
+                else float(raw_take_profit_2)
             )
         except (TypeError, ValueError) as error:
             raise WebullPreviewStoreError(
@@ -152,6 +170,32 @@ class WebullPreviewStore:
                 raise WebullPreviewStoreError(
                     "Preview trading stop must be below "
                     "the BUY limit price."
+                )
+
+        if (
+            (take_profit_1 is None)
+            != (take_profit_2 is None)
+        ):
+            raise WebullPreviewStoreError(
+                "Quick Flip take-profit levels must "
+                "either both be present or both be absent."
+            )
+
+        if take_profit_1 is not None:
+            if take_profit_1 <= 0:
+                raise WebullPreviewStoreError(
+                    "Quick Flip takeProfit1 must be positive."
+                )
+
+            if take_profit_2 <= 0:
+                raise WebullPreviewStoreError(
+                    "Quick Flip takeProfit2 must be positive."
+                )
+
+            if take_profit_2 <= take_profit_1:
+                raise WebullPreviewStoreError(
+                    "Quick Flip takeProfit2 must be above "
+                    "takeProfit1."
                 )
 
         expected_exposure = round(
@@ -312,8 +356,7 @@ class WebullPreviewStore:
                 )
 
         # Legacy version-1 previews may not contain lifecycle
-        # prices. Preserve compatibility when reading them, while
-        # all newly generated previews include both fields.
+        # prices. Preserve compatibility when reading them.
         if target_price is not None:
             validated["targetPrice"] = round(
                 target_price,
@@ -321,6 +364,16 @@ class WebullPreviewStore:
             )
             validated["tradingStopPrice"] = round(
                 stop_price,
+                4,
+            )
+
+        if take_profit_1 is not None:
+            validated["takeProfit1"] = round(
+                take_profit_1,
+                4,
+            )
+            validated["takeProfit2"] = round(
+                take_profit_2,
                 4,
             )
 

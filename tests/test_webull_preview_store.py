@@ -198,3 +198,69 @@ def test_rejects_invalid_strategy_metadata(
         WebullPreviewStore(
             tmp_path / "previews.json"
         ).save_previews([invalid])
+
+
+def test_store_accepts_quick_flip_take_profits(
+    tmp_path,
+):
+    path = (
+        tmp_path
+        / "quick_flip_previews.json"
+    )
+
+    store = WebullPreviewStore(path)
+
+    store.save_previews([
+        {
+            "symbol": "OPEN",
+            "quantity": 10,
+            "limitPrice": 9.50,
+            "takeProfit1": 10.00,
+            "takeProfit2": 10.50,
+            "proposedExposure": 95.00,
+            "strategyName": "QUICK_FLIP",
+            "status": "PREVIEW READY",
+            "createdAt": (
+                "2026-08-11T18:45:00Z"
+            ),
+        }
+    ])
+
+    preview = store.load_preview("OPEN")
+
+    assert preview["strategyName"] == (
+        "QUICK_FLIP"
+    )
+    assert preview["takeProfit1"] == 10.00
+    assert preview["takeProfit2"] == 10.50
+    assert "tradingStopPrice" not in preview
+
+
+def test_store_rejects_partial_quick_flip_targets(
+    tmp_path,
+):
+    path = (
+        tmp_path
+        / "quick_flip_previews.json"
+    )
+
+    store = WebullPreviewStore(path)
+
+    with pytest.raises(
+        WebullPreviewStoreError,
+        match="take-profit levels",
+    ):
+        store.save_previews([
+            {
+                "symbol": "OPEN",
+                "quantity": 10,
+                "limitPrice": 9.50,
+                "takeProfit1": 10.00,
+                "proposedExposure": 95.00,
+                "strategyName": "QUICK_FLIP",
+                "status": "PREVIEW READY",
+                "createdAt": (
+                    "2026-08-11T18:45:00Z"
+                ),
+            }
+        ])

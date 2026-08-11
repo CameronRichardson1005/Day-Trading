@@ -33,7 +33,10 @@ LIGHT_GREEN = {
 }
 
 class SheetsClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        spreadsheet_id: str | None = None,
+    ) -> None:
         self.credentials = Credentials.from_service_account_file(
             CREDS_FILE,
             scopes=SCOPES,
@@ -43,9 +46,25 @@ class SheetsClient:
         self.google_client.set_timeout(
             SHEETS_REQUEST_TIMEOUT
         )
+
+        selected_spreadsheet_id = (
+            SPREADSHEET_ID
+            if spreadsheet_id is None
+            else str(spreadsheet_id).strip()
+        )
+
+        if not selected_spreadsheet_id:
+            raise ValueError(
+                "Google spreadsheet ID cannot be empty."
+            )
+
+        self.spreadsheet_id = (
+            selected_spreadsheet_id
+        )
+
         self.spreadsheet = (
             self.google_client.open_by_key(
-                SPREADSHEET_ID
+                self.spreadsheet_id
             )
         )
 
@@ -70,7 +89,22 @@ class SheetsClient:
         expected_columns: list[str],
         sheet_name: str,
     ) -> None:
-        if existing_values and existing_values[0] != expected_columns:
+        if not existing_values:
+            return
+
+        first_row = existing_values[0]
+
+        # Google Sheets may represent a newly-created blank
+        # worksheet as [[]]. Treat a row containing no values as
+        # an empty sheet so the production writer can establish
+        # its header normally.
+        if not first_row or not any(
+            str(value).strip()
+            for value in first_row
+        ):
+            return
+
+        if first_row != expected_columns:
             raise RuntimeError(
                 f"{sheet_name} has unexpected columns. "
                 "The sheet was not modified."
@@ -1773,9 +1807,10 @@ class SheetsClient:
     def write_minute_bars_history(
         self,
         date_str: str,
-        stocks: dict,
+        stocks: dict | None = None,
         data_feed: str = "iex",
         source: str = "LIVE",
+        bars_by_symbol: dict | None = None,
     ) -> None:
         """
         Store every genuine reconciled one-minute bar permanently.
@@ -1810,8 +1845,21 @@ class SheetsClient:
             list,
         ] = {}
 
-        for stock in stocks.values():
-            for bar in stock.minute_bars:
+        if bars_by_symbol is None:
+            if stocks is None:
+                raise ValueError(
+                    "stocks or bars_by_symbol is required."
+                )
+
+            source_bars = {
+                stock.symbol: stock.minute_bars
+                for stock in stocks.values()
+            }
+        else:
+            source_bars = bars_by_symbol
+
+        for symbol, bars in source_bars.items():
+            for bar in bars:
                 raw_timestamp = str(
                     bar.get("t", "")
                 ).strip()
@@ -1826,13 +1874,13 @@ class SheetsClient:
                 )
 
                 key = (
-                    stock.symbol,
+                    symbol,
                     timestamp_utc,
                 )
 
                 unique_rows[key] = [
                     date_str,
-                    stock.symbol,
+                    symbol,
                     timestamp_utc,
                     timestamp_et,
                     bar.get("o", ""),
@@ -2040,6 +2088,323 @@ class SheetsClient:
         print(
             f"{len(strategy_rows)} strategy row(s) reconciled "
             f"in the {sheet_name} sheet."
+        )
+
+    def write_quick_flip_results(
+            self,
+            date_str: str,
+            results: dict,
+            sheet_name: str = "Quick Flip Signals",
+    ) -> None:
+        """
+        Reconcile Quick Flip strategy results for one date.
+
+        Quick Flip is long-only and intentionally has no
+        automatic stop-loss field.
+        """
+        columns = [
+            "Date",
+            "Symbol",
+            "Status",
+            "Signal",
+            "Pattern",
+            "Entry",
+            "TP1",
+            "TP2",
+            "Opening Box High",
+            "Opening Box Low",
+            "Opening Box Size",
+            "ATR14",
+            "Liquidity Threshold",
+            "Reversal Time",
+            "Confirmation Time",
+            "Detail",
+            "Automatic Stop Loss",
+            "Broker Submitted",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title=sheet_name,
+            rows=250,
+            cols=len(columns),
+        )
+
+        rows = []
+
+        for symbol in sorted(results):
+            result = results[symbol]
+
+            if result is None:
+                rows.append([
+                    date_str,
+                    symbol,
+                    "NO RESULT",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "NO",
+                    "NO",
+                ])
+                continue
+
+            signal = getattr(
+                result,
+                "signal",
+                None,
+            )
+
+            rows.append([
+                date_str,
+                symbol,
+                getattr(
+                    result,
+                    "status",
+                    "",
+                ),
+                (
+                    ""
+                    if signal is None
+                    else signal.signal
+                ),
+                (
+                    ""
+                    if signal is None
+                    else signal.pattern
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.entry_price
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.take_profit_1
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.take_profit_2
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.opening_range_high
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.opening_range_low
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.opening_range_size
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.atr_14
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else self._optional_round(
+                        signal.liquidity_threshold
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else str(
+                        signal.reversal_time
+                        or ""
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else str(
+                        signal.confirmation_time
+                        or ""
+                    )
+                ),
+                (
+                    ""
+                    if signal is None
+                    else signal.detail
+                ),
+                "NO",
+                "NO",
+            ])
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=rows,
+            last_column="R",
+            sheet_name=sheet_name,
+        )
+
+        print(
+            f"{len(rows)} Quick Flip result row(s) "
+            f"reconciled in the {sheet_name} sheet."
+        )
+
+    def write_quick_flip_previews(
+            self,
+            date_str: str,
+            previews: list[dict],
+            sheet_name: str = "Quick Flip Previews",
+    ) -> None:
+        """
+        Store Quick Flip Webull previews.
+
+        These rows are preview-only. No automatic stop is
+        represented and no broker submission is implied.
+        """
+        columns = [
+            "Date",
+            "Symbol",
+            "Status",
+            "Quantity",
+            "Entry",
+            "TP1",
+            "TP2",
+            "Estimated Position Value",
+            "Maximum Position Value",
+            "Sizing Constraint",
+            "Safety Allowed",
+            "Safety Reason",
+            "Manual Approval Required",
+            "Manual Approval Granted",
+            "Automatic Stop Loss",
+            "Estimated Cost",
+            "Estimated Fee",
+            "Submitted",
+        ]
+
+        worksheet = self.get_or_create_worksheet(
+            title=sheet_name,
+            rows=250,
+            cols=len(columns),
+        )
+
+        rows = []
+
+        for preview in previews:
+            rows.append([
+                date_str,
+                preview.get(
+                    "symbol",
+                    "",
+                ),
+                preview.get(
+                    "status",
+                    "",
+                ),
+                preview.get(
+                    "quantity",
+                    "",
+                ),
+                preview.get(
+                    "limitBuy",
+                    "",
+                ),
+                preview.get(
+                    "takeProfit1",
+                    "",
+                ),
+                preview.get(
+                    "takeProfit2",
+                    "",
+                ),
+                preview.get(
+                    "estimatedPositionValue",
+                    "",
+                ),
+                preview.get(
+                    "maxPositionValue",
+                    "",
+                ),
+                preview.get(
+                    "sizingConstraint",
+                    "",
+                ),
+                (
+                    "YES"
+                    if preview.get(
+                        "safetyAllowed"
+                    )
+                    else "NO"
+                ),
+                preview.get(
+                    "safetyReason",
+                    "",
+                ),
+                (
+                    "YES"
+                    if preview.get(
+                        "manualApprovalRequired"
+                    )
+                    else "NO"
+                ),
+                (
+                    "YES"
+                    if preview.get(
+                        "manualApprovalGranted"
+                    )
+                    else "NO"
+                ),
+                "NO",
+                preview.get(
+                    "estimatedCost",
+                    "",
+                ),
+                preview.get(
+                    "estimatedTransactionFee",
+                    "",
+                ),
+                "NO",
+            ])
+
+        self._replace_date_rows(
+            worksheet=worksheet,
+            columns=columns,
+            date_str=date_str,
+            replacement_rows=rows,
+            last_column="R",
+            sheet_name=sheet_name,
+        )
+
+        print(
+            f"{len(rows)} Quick Flip preview row(s) "
+            f"reconciled in the {sheet_name} sheet."
         )
 
     def write_orders(

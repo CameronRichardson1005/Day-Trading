@@ -69,6 +69,12 @@ FIBONACCI_MONITOR_START = "09:45"
 FIBONACCI_MONITOR_CUTOFF = "11:00"
 FIBONACCI_MONITOR_INTERVAL_SECONDS = 60
 
+# Quick Flip monitors completed 5-minute reversal candles
+# after the 09:30-09:45 opening range has closed.
+QUICK_FLIP_MONITOR_START = "09:45"
+QUICK_FLIP_MONITOR_CUTOFF = "11:00"
+QUICK_FLIP_MONITOR_INTERVAL_SECONDS = 60
+
 TICKERS = [
     "BBAI",
     "OPEN",
@@ -141,6 +147,15 @@ if not SPREADSHEET_ID:
     raise RuntimeError(
         "GOOGLE_SPREADSHEET_ID cannot be empty."
     )
+
+# Separate clean workbook for the current Manipulation +
+# Quick Flip workflow. The legacy GOOGLE_SPREADSHEET_ID
+# remains unchanged and continues to preserve the existing
+# workbook/history.
+NEW_TRADING_SPREADSHEET_ID = os.getenv(
+    "NEW_TRADING_SPREADSHEET_ID",
+    "",
+).strip()
 
 SHEETS_REQUEST_TIMEOUT = (10, 20)
 

@@ -1,13 +1,14 @@
 import csv
 import os
 import time as time_module
+import subprocess
 
 from contextlib import redirect_stdout
 from dataclasses import asdict
 from datetime import UTC, datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from zoneinfo import ZoneInfo
 
 from .webull_preview_service import WebullPreviewService
@@ -43,6 +44,14 @@ from .fibonacci_retracement import (
     stopped_out_then_target,
 )
 from .fibonacci_strategy import Fibonacci618Strategy
+from .quick_flip_webull_preview_service import (
+    QuickFlipWebullPreviewService,
+)
+from .quick_flip_monitor import (
+    QuickFlipMonitor,
+    reconcile_minute_bars,
+)
+from .quick_flip_strategy import QuickFlipCandle
 
 from .backtest import (
     BacktestReport,
@@ -59,6 +68,10 @@ from .config import (
     FIBONACCI_STRATEGY_NAME,
     MANIPULATION_STRATEGY_NAME,
     MARKET_DATA_FEED,
+    NEW_TRADING_SPREADSHEET_ID,
+    QUICK_FLIP_MONITOR_CUTOFF,
+    QUICK_FLIP_MONITOR_INTERVAL_SECONDS,
+    QUICK_FLIP_MONITOR_START,
     TICKERS,
 )
 from .dashboard_exporter import DashboardExporter
@@ -113,13 +126,30 @@ class TradingBot:
         # Separate active paper/preview Fibonacci adapter.
         self.fibonacci_strategy = Fibonacci618Strategy()
 
+        # Quick Flip remains completely independent from the
+        # Stock fields used by the preserved Manipulation strategy.
+        #
+        # Quick Flip results are stored by symbol so running it
+        # cannot overwrite Manipulation signal, entry, target,
+        # or stop-loss values.
+        self.quick_flip_monitor = QuickFlipMonitor()
+        self.quick_flip_results = {}
+        self.quick_flip_status = {}
+
         self.scanner = StockScanner(
             current_symbols=TICKERS,
         )
         self.scanner_statistics = None
         self.symbol_reliability = None
 
+        # Legacy workbook used by the existing tracker and
+        # historical workflow.
         self.sheets = None
+
+        # Separate clean workbook for Manipulation + Quick Flip.
+        # This never replaces self.sheets.
+        self.trading_sheets = None
+
         self.tracker = None
         self.dashboard = DashboardExporter()
 
@@ -318,6 +348,29 @@ class TradingBot:
 
         return selected_symbols
 
+    def initialise_trading_sheets(
+            self,
+    ) -> None:
+        """
+        Initialise the separate clean Manipulation + Quick Flip
+        workbook.
+
+        This method never changes the legacy self.sheets client.
+        """
+        if self.trading_sheets is not None:
+            return
+
+        if not NEW_TRADING_SPREADSHEET_ID:
+            raise RuntimeError(
+                "NEW_TRADING_SPREADSHEET_ID is not configured."
+            )
+
+        self.trading_sheets = SheetsClient(
+            spreadsheet_id=(
+                NEW_TRADING_SPREADSHEET_ID
+            ),
+        )
+
     def initialise_sheets(
             self,
             write_sheets: bool = True,
@@ -333,6 +386,116 @@ class TradingBot:
                 symbols_csv=self.symbols_csv,
                 write_sheets=write_sheets,
             )
+
+    def write_new_trading_scanner(
+            self,
+            date_str: str,
+            selected_symbols,
+    ) -> None:
+        """
+        Write the scanner view to the separate clean
+        Manipulation + Quick Flip workbook.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        if self.scanner_statistics is None:
+            return
+
+        self.trading_sheets.write_scanner_dashboard(
+            date_str=date_str,
+            statistics=self.scanner_statistics,
+            selected_symbols=selected_symbols,
+            scanner=self.scanner,
+        )
+
+    def write_new_manipulation_results(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Copy the current preserved Manipulation strategy state
+        into the separate clean trading workbook.
+
+        The legacy workbook is not modified by this method.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_strategy_results(
+            date_str=date_str,
+            stocks=self.stocks,
+            sheet_name="Manipulation Signals",
+        )
+
+    def write_new_quick_flip_results(
+            self,
+            date_str: str,
+    ) -> None:
+        """
+        Reconcile Quick Flip signals and Webull previews into
+        the separate clean trading workbook.
+
+        Quick Flip remains long-only with no automatic stop
+        and no broker submission.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_quick_flip_results(
+            date_str=date_str,
+            results=self.quick_flip_results,
+            sheet_name="Quick Flip Signals",
+        )
+
+        self.trading_sheets.write_quick_flip_previews(
+            date_str=date_str,
+            previews=getattr(
+                self,
+                "quick_flip_webull_previews",
+                [],
+            ),
+            sheet_name="Quick Flip Previews",
+        )
+
+    def write_new_minute_bars_history(
+            self,
+            date_str: str,
+            bars_by_symbol: dict,
+            source: str,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> None:
+        """
+        Archive genuine reconciled one-minute bars in the
+        separate trading workbook.
+
+        Missing minutes are never fabricated.
+        """
+        self.initialise_trading_sheets()
+
+        if self.trading_sheets is None:
+            raise RuntimeError(
+                "New trading workbook was not initialised."
+            )
+
+        self.trading_sheets.write_minute_bars_history(
+            date_str=date_str,
+            bars_by_symbol=bars_by_symbol,
+            data_feed=data_feed,
+            source=source,
+        )
 
     def run(self) -> None:
         print("===================================")
@@ -638,6 +801,29 @@ class TradingBot:
                 "scanner statistics were unavailable."
             )
 
+        if (
+            write_sheets
+            and self.scanner_statistics is not None
+        ):
+            try:
+                self.write_new_trading_scanner(
+                    date_str=date_str,
+                    selected_symbols=selected_symbols,
+                )
+                print(
+                    "New trading workbook scanner "
+                    "updated successfully."
+                )
+            except Exception as error:
+                print(
+                    "WARNING: New trading workbook "
+                    "scanner write failed. "
+                    "Live tracking will continue."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
+
         print()
         print("Starting real-time 1-minute tracker...")
         print(
@@ -726,6 +912,51 @@ class TradingBot:
                 "WebSocket bars merged successfully."
             )
 
+        if write_sheets:
+            opening_stocks = getattr(
+                self,
+                "stocks",
+                {},
+            )
+
+            opening_bars_by_symbol = {
+                symbol: list(
+                    getattr(
+                        stock,
+                        "minute_bars",
+                        [],
+                    )
+                )
+                for symbol, stock
+                in opening_stocks.items()
+            }
+
+            if opening_bars_by_symbol:
+                try:
+                    self.write_new_minute_bars_history(
+                        date_str=date_str,
+                        bars_by_symbol=(
+                            opening_bars_by_symbol
+                        ),
+                        source="LIVE_RECONCILED_OPENING",
+                        data_feed=MARKET_DATA_FEED,
+                    )
+
+                    print(
+                        "Reconciled opening minute bars "
+                        "written to new trading workbook."
+                    )
+
+                except Exception as error:
+                    print(
+                        "WARNING: New trading workbook "
+                        "minute history write failed. "
+                        "Live processing will continue."
+                    )
+                    print(
+                        f"Minute history error: {error}"
+                    )
+
         processed_bars = {
             symbol: (
                 stock.green_minutes
@@ -771,6 +1002,25 @@ class TradingBot:
             )
             print(f"Strategy error: {error}")
 
+        if write_sheets:
+            try:
+                self.write_new_manipulation_results(
+                    date_str=date_str,
+                )
+                print(
+                    "Manipulation results written to "
+                    "new trading workbook."
+                )
+            except Exception as error:
+                print(
+                    "WARNING: New trading workbook "
+                    "Manipulation write failed. "
+                    "Legacy results remain preserved."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
+
         if publish_dashboard:
             self._publish_dashboard_session(
                 date_str=date_str,
@@ -782,6 +1032,977 @@ class TradingBot:
                 "DRY-RUN MODE: Cloudflare dashboard "
                 "upload was skipped."
             )
+
+        print()
+        print(
+            "Manipulation opening strategy completed. "
+            "Starting independent Quick Flip monitoring..."
+        )
+
+        try:
+            self.run_quick_flip_monitor(
+                date_str=date_str,
+                data_feed=MARKET_DATA_FEED,
+                stream_factory=AlpacaStockStream,
+                preview_service_factory=(
+                    QuickFlipWebullPreviewService
+                ),
+                write_sheets=write_sheets,
+            )
+        except Exception as error:
+            print(
+                "Quick Flip live monitoring failed. "
+                "Manipulation results remain preserved."
+            )
+            print(
+                f"Quick Flip error: {error}"
+            )
+
+
+    def run_quick_flip_monitor(
+            self,
+            date_str: str,
+            now_fn=None,
+            sleep_fn=None,
+            data_feed: str = MARKET_DATA_FEED,
+            stream_factory=None,
+            preview_service_factory=None,
+            write_sheets: bool = False,
+    ) -> None:
+        """
+        Monitor Quick Flip from 09:45 through 11:00 ET.
+
+        The opening 15-minute candle and Wilder ATR14 are
+        fetched once because they remain fixed for the session.
+
+        Intraday one-minute bars are fetched incrementally and
+        accumulated locally. QuickFlipMonitor then aggregates
+        only complete 5-minute candles.
+
+        This method:
+        - does not alter Manipulation Stock.signal fields;
+        - does not calculate a stop loss;
+        - writes only to the separate trading workbook when
+          write_sheets=True;
+        - may create preview-only Webull requests;
+        - cannot submit a broker order.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        now_fn = now_fn or (
+            lambda: datetime.now(eastern)
+        )
+        sleep_fn = sleep_fn or time_module.sleep
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        monitor_start = self._session_clock(
+            trading_date,
+            QUICK_FLIP_MONITOR_START,
+            eastern,
+        )
+
+        monitor_cutoff = self._session_clock(
+            trading_date,
+            QUICK_FLIP_MONITOR_CUTOFF,
+            eastern,
+        )
+
+        print()
+        print("===================================")
+        print(" Quick Flip Live Monitor")
+        print("===================================")
+        print(f"Trading date: {date_str}")
+        print(
+            "Monitoring window:",
+            QUICK_FLIP_MONITOR_START,
+            "to",
+            QUICK_FLIP_MONITOR_CUTOFF,
+            "New York time",
+        )
+        print(
+            "LONG ONLY · NO AUTOMATIC STOP LOSS"
+        )
+        print(
+            "SIGNAL MONITORING ONLY · "
+            "NO BROKER ORDER SUBMISSION"
+        )
+
+        now = now_fn()
+
+        if now.tzinfo is None:
+            now = now.replace(
+                tzinfo=eastern,
+            )
+        else:
+            now = now.astimezone(
+                eastern
+            )
+
+        if now < monitor_start:
+            wait_seconds = (
+                monitor_start - now
+            ).total_seconds()
+
+            print(
+                "Waiting for Quick Flip monitoring "
+                f"to begin at {QUICK_FLIP_MONITOR_START} ET..."
+            )
+
+            sleep_fn(wait_seconds)
+
+            now = now_fn()
+
+            if now.tzinfo is None:
+                now = now.replace(
+                    tzinfo=eastern,
+                )
+            else:
+                now = now.astimezone(
+                    eastern
+                )
+
+        if now >= monitor_cutoff:
+            print(
+                "Quick Flip monitoring cutoff has "
+                "already passed."
+            )
+            return
+
+        print(
+            "Loading Quick Flip opening ranges "
+            "and ATR14 values..."
+        )
+
+        opening_bars = (
+            self.alpaca.get_opening_15min_bars(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        intraday_bars = {
+            symbol: []
+            for symbol in self.stocks
+        }
+
+        stream = None
+        stream_stop_event = None
+        stream_thread = None
+        stream_error = {
+            "value": None,
+        }
+
+        if stream_factory is not None:
+            try:
+                stream = stream_factory(
+                    symbols=list(
+                        self.stocks
+                    ),
+                    feed=data_feed,
+                )
+
+                stream_stop_event = Event()
+
+                stream_stop_time = (
+                    monitor_cutoff
+                    .astimezone(utc)
+                    .replace(tzinfo=None)
+                )
+
+                def collect_quick_flip_stream():
+                    try:
+                        stream.collect_until(
+                            stop_time=(
+                                stream_stop_time
+                            ),
+                            stop_event=(
+                                stream_stop_event
+                            ),
+                        )
+                    except Exception as error:
+                        stream_error[
+                            "value"
+                        ] = error
+
+                stream_thread = Thread(
+                    target=(
+                        collect_quick_flip_stream
+                    ),
+                    name=(
+                        "quick-flip-alpaca-stream"
+                    ),
+                    daemon=True,
+                )
+
+                print(
+                    "Starting Quick Flip "
+                    f"{data_feed.upper()} "
+                    "WebSocket collector..."
+                )
+
+                stream_thread.start()
+
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip WebSocket "
+                    f"could not start: {error}. "
+                    "REST reconciliation will "
+                    "continue."
+                )
+
+                stream = None
+                stream_stop_event = None
+                stream_thread = None
+
+        def merge_stream_snapshot() -> None:
+            """
+            Merge the latest WebSocket representation first.
+
+            REST reconciliation is deliberately applied after
+            this function so REST remains authoritative when
+            both sources contain the same completed minute.
+            """
+            if stream is None:
+                return
+
+            try:
+                snapshot = stream.snapshot()
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip WebSocket "
+                    f"snapshot failed: {error}. "
+                    "REST reconciliation will "
+                    "continue."
+                )
+                return
+
+            for symbol in self.stocks:
+                intraday_bars[
+                    symbol
+                ] = reconcile_minute_bars(
+                    intraday_bars[
+                        symbol
+                    ],
+                    snapshot.get(
+                        symbol,
+                        [],
+                    ),
+                )
+
+        fetch_start = monitor_start
+        last_signature = None
+
+        # A confirmed setup may remain INVEST across many
+        # one-minute monitoring cycles. Remember exactly which
+        # setups have already generated a Webull preview so the
+        # same signal cannot be previewed repeatedly.
+        previewed_signal_keys = set()
+
+        self.quick_flip_webull_previews = []
+
+        preview_service = (
+            preview_service_factory()
+            if preview_service_factory is not None
+            else None
+        )
+
+        def quick_flip_signal_key(
+                symbol,
+                signal,
+        ):
+            return (
+                symbol,
+                str(signal.pattern),
+                round(
+                    float(signal.entry_price),
+                    6,
+                ),
+                str(
+                    getattr(
+                        signal,
+                        "reversal_time",
+                        None,
+                    )
+                ),
+                str(
+                    getattr(
+                        signal,
+                        "confirmation_time",
+                        None,
+                    )
+                ),
+            )
+
+        def notify_quick_flip_preview(
+                preview,
+        ) -> None:
+            """
+            Show a macOS desktop notification for a newly
+            created Quick Flip Webull preview.
+
+            Notification failure never interrupts trading
+            strategy monitoring.
+            """
+            if preview.get("status") != "PREVIEW READY":
+                return
+
+            symbol = str(
+                preview.get("symbol", "")
+            )
+
+            quantity = int(
+                preview.get("quantity", 0)
+            )
+
+            entry = float(
+                preview.get("limitBuy", 0)
+            )
+
+            tp1 = float(
+                preview.get("takeProfit1", 0)
+            )
+
+            tp2 = float(
+                preview.get("takeProfit2", 0)
+            )
+
+            title = (
+                "Quick Flip Webull Preview Ready"
+            )
+
+            message = (
+                f"{symbol} · {quantity} shares · "
+                f"Entry ${entry:.4f} · "
+                f"TP1 ${tp1:.4f} · "
+                f"TP2 ${tp2:.4f}"
+            )
+
+            # Escape values for AppleScript strings.
+            safe_title = (
+                title
+                .replace("\\", "\\\\")
+                .replace('"', '\\"')
+            )
+
+            safe_message = (
+                message
+                .replace("\\", "\\\\")
+                .replace('"', '\\"')
+            )
+
+            script = (
+                'display notification '
+                f'"{safe_message}" '
+                f'with title "{safe_title}"'
+            )
+
+            try:
+                subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        script,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip macOS "
+                    "notification failed: "
+                    f"{error}"
+                )
+
+        def prepare_new_quick_flip_previews():
+            if preview_service is None:
+                return []
+
+            new_results = {}
+            new_keys = {}
+
+            for symbol, result in (
+                self.quick_flip_results.items()
+            ):
+                if result is None:
+                    continue
+
+                signal = getattr(
+                    result,
+                    "signal",
+                    None,
+                )
+
+                if (
+                    signal is None
+                    or signal.signal != "INVEST"
+                ):
+                    continue
+
+                signal_key = (
+                    quick_flip_signal_key(
+                        symbol,
+                        signal,
+                    )
+                )
+
+                if (
+                    signal_key
+                    in previewed_signal_keys
+                ):
+                    continue
+
+                new_results[symbol] = result
+                new_keys[symbol] = signal_key
+
+            if not new_results:
+                return []
+
+            try:
+                previews = (
+                    preview_service
+                    .prepare_previews(
+                        new_results
+                    )
+                )
+            except Exception as error:
+                print(
+                    "WARNING: Quick Flip Webull "
+                    "preview preparation failed: "
+                    f"{error}. Monitoring will "
+                    "continue."
+                )
+                return []
+
+            for preview in previews:
+                symbol = preview.get(
+                    "symbol"
+                )
+
+                # Mark the signal as handled once the preview
+                # service has returned a result, whether READY
+                # or FAILED. This prevents a failing Webull/API
+                # condition from hammering the endpoint every
+                # minute for the same setup.
+                if symbol in new_keys:
+                    previewed_signal_keys.add(
+                        new_keys[symbol]
+                    )
+
+                self.quick_flip_webull_previews.append(
+                    preview
+                )
+
+                if (
+                    preview.get("status")
+                    == "PREVIEW READY"
+                ):
+                    print(
+                        f"{symbol}: QUICK FLIP "
+                        "WEBULL PREVIEW READY · "
+                        f"{preview['quantity']} shares · "
+                        f"entry "
+                        f"${preview['limitBuy']:.4f} · "
+                        f"TP1 "
+                        f"${preview['takeProfit1']:.4f} · "
+                        f"TP2 "
+                        f"${preview['takeProfit2']:.4f} · "
+                        "NO AUTOMATIC STOP · "
+                        "NOT SUBMITTED"
+                    )
+
+                    notify_quick_flip_preview(
+                        preview
+                    )
+                else:
+                    print(
+                        f"{symbol}: QUICK FLIP "
+                        "WEBULL PREVIEW FAILED · "
+                        f"{preview.get('error', 'Unknown error')}"
+                    )
+
+            return previews
+
+        def evaluate_current_state(
+                *,
+                evaluation_end: datetime,
+                cutoff_reached: bool,
+        ) -> None:
+            self.quick_flip_results = {}
+            self.quick_flip_status = {}
+
+            for symbol in self.stocks:
+                opening_bar = (
+                    opening_bars.get(symbol)
+                )
+
+                atr_14 = atrs.get(symbol)
+
+                if opening_bar is None:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "MISSING_OPENING_BAR"
+
+                    continue
+
+                if atr_14 is None:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "MISSING_ATR14"
+
+                    continue
+
+                try:
+                    result = (
+                        self.quick_flip_monitor
+                        .evaluate_minute_bars(
+                            symbol=symbol,
+                            opening_bar=(
+                                self
+                                ._quick_flip_candle_from_bar(
+                                    opening_bar
+                                )
+                            ),
+                            atr_14=float(
+                                atr_14
+                            ),
+                            minute_bars=(
+                                intraday_bars[
+                                    symbol
+                                ]
+                            ),
+                            evaluation_end=(
+                                evaluation_end
+                                .astimezone(utc)
+                            ),
+                            cutoff_reached=(
+                                cutoff_reached
+                            ),
+                        )
+                    )
+
+                    self.quick_flip_results[
+                        symbol
+                    ] = result
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = result.status
+
+                except Exception as error:
+                    self.quick_flip_results[
+                        symbol
+                    ] = None
+
+                    self.quick_flip_status[
+                        symbol
+                    ] = "EVALUATION_FAILED"
+
+                    print(
+                        f"{symbol}: Quick Flip "
+                        f"evaluation failed: {error}"
+                    )
+
+        while True:
+            now = now_fn()
+
+            if now.tzinfo is None:
+                now = now.replace(
+                    tzinfo=eastern,
+                )
+            else:
+                now = now.astimezone(
+                    eastern
+                )
+
+            if now >= monitor_cutoff:
+                break
+
+            evaluation_end = now.replace(
+                second=0,
+                microsecond=0,
+            )
+
+            if evaluation_end <= monitor_start:
+                sleep_fn(
+                    QUICK_FLIP_MONITOR_INTERVAL_SECONDS
+                )
+                continue
+
+            # Fast source first.
+            merge_stream_snapshot()
+
+            if evaluation_end > fetch_start:
+                start_utc = (
+                    fetch_start.astimezone(
+                        utc
+                    )
+                )
+
+                end_utc = (
+                    evaluation_end.astimezone(
+                        utc
+                    )
+                )
+
+                rest_fetch_succeeded = False
+
+                try:
+                    fetched = (
+                        self.alpaca
+                        .get_historical_1min_bars(
+                            symbols_csv=self.symbols_csv,
+                            start_iso=start_utc.strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            end_iso=end_utc.strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            feed=data_feed,
+                        )
+                    )
+
+                    rest_fetch_succeeded = True
+
+                except Exception as error:
+                    print(
+                        "WARNING: Quick Flip market-data "
+                        f"fetch failed: {error}. "
+                        "WebSocket data will be used "
+                        "when available and REST will "
+                        "retry."
+                    )
+
+                    fetched = {}
+
+                # Authoritative reconciliation second.
+                for symbol in self.stocks:
+                    intraday_bars[
+                        symbol
+                    ] = reconcile_minute_bars(
+                        intraday_bars[
+                            symbol
+                        ],
+                        fetched.get(
+                            symbol,
+                            [],
+                        ),
+                    )
+
+                if rest_fetch_succeeded:
+                    fetch_start = evaluation_end
+
+            evaluate_current_state(
+                evaluation_end=evaluation_end,
+                cutoff_reached=False,
+            )
+
+            prepare_new_quick_flip_previews()
+
+            signature = tuple(
+                sorted(
+                    (
+                        symbol,
+                        result.status,
+                        (
+                            result.signal.pattern
+                            if (
+                                result is not None
+                                and result.signal
+                                is not None
+                            )
+                            else None
+                        ),
+                        (
+                            result.signal.entry_price
+                            if (
+                                result is not None
+                                and result.signal
+                                is not None
+                            )
+                            else None
+                        ),
+                    )
+                    for symbol, result
+                    in self.quick_flip_results.items()
+                    if result is not None
+                )
+            )
+
+            if signature != last_signature:
+                print()
+                print(
+                    "Quick Flip state changed:"
+                )
+
+                for symbol in sorted(
+                    self.quick_flip_status
+                ):
+                    status = (
+                        self.quick_flip_status[
+                            symbol
+                        ]
+                    )
+
+                    result = (
+                        self.quick_flip_results.get(
+                            symbol
+                        )
+                    )
+
+                    if (
+                        result is not None
+                        and result.signal is not None
+                        and result.signal.signal
+                        == "INVEST"
+                    ):
+                        signal = result.signal
+
+                        print(
+                            f"{symbol}: INVEST · "
+                            f"{signal.pattern} · "
+                            f"Entry ${signal.entry_price:.4f} · "
+                            f"TP1 ${signal.take_profit_1:.4f} · "
+                            f"TP2 ${signal.take_profit_2:.4f}"
+                        )
+                    elif status not in {
+                        "WATCHING",
+                    }:
+                        print(
+                            f"{symbol}: {status}"
+                        )
+
+                if write_sheets:
+                    try:
+                        self.write_new_quick_flip_results(
+                            date_str=date_str,
+                        )
+
+                        print(
+                            "Quick Flip state written to "
+                            "new trading workbook."
+                        )
+
+                    except Exception as error:
+                        print(
+                            "WARNING: New trading workbook "
+                            "Quick Flip write failed. "
+                            "Monitoring will continue."
+                        )
+                        print(
+                            f"New workbook error: {error}"
+                        )
+
+                last_signature = signature
+
+            sleep_fn(
+                QUICK_FLIP_MONITOR_INTERVAL_SECONDS
+            )
+
+        # --------------------------------------------
+        # Stop the WebSocket collector at the cutoff.
+        # --------------------------------------------
+        if stream_stop_event is not None:
+            stream_stop_event.set()
+
+        if stream_thread is not None:
+            stream_thread.join(
+                timeout=2
+            )
+
+        if stream_error["value"] is not None:
+            print(
+                "WARNING: Quick Flip WebSocket "
+                f"collector stopped with error: "
+                f"{stream_error['value']}. "
+                "Final REST reconciliation will "
+                "continue."
+            )
+
+        # Capture the final stream representation before
+        # applying the authoritative REST reconciliation.
+        merge_stream_snapshot()
+
+        # --------------------------------------------
+        # Final 11:00 evaluation.
+        # --------------------------------------------
+        if fetch_start < monitor_cutoff:
+            try:
+                final_fetch = (
+                    self.alpaca
+                    .get_historical_1min_bars(
+                        symbols_csv=self.symbols_csv,
+                        start_iso=(
+                            fetch_start
+                            .astimezone(utc)
+                            .strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        ),
+                        end_iso=(
+                            monitor_cutoff
+                            .astimezone(utc)
+                            .strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            )
+                        ),
+                        feed=data_feed,
+                    )
+                )
+
+                for symbol in self.stocks:
+                    intraday_bars[
+                        symbol
+                    ] = reconcile_minute_bars(
+                        intraday_bars[
+                            symbol
+                        ],
+                        final_fetch.get(
+                            symbol,
+                            [],
+                        ),
+                    )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final Quick Flip "
+                    f"market-data fetch failed: {error}"
+                )
+
+        evaluate_current_state(
+            evaluation_end=monitor_cutoff,
+            cutoff_reached=True,
+        )
+
+        prepare_new_quick_flip_previews()
+
+        if write_sheets:
+            try:
+                self.write_new_quick_flip_results(
+                    date_str=date_str,
+                )
+
+                print(
+                    "Final Quick Flip state written to "
+                    "new trading workbook."
+                )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final new trading workbook "
+                    "Quick Flip write failed."
+                )
+                print(
+                    f"New workbook error: {error}"
+                )
+
+            try:
+                combined_bars_by_symbol = {}
+
+                for symbol, stock in getattr(
+                    self,
+                    "stocks",
+                    {},
+                ).items():
+                    combined_bars_by_symbol[
+                        symbol
+                    ] = reconcile_minute_bars(
+                        list(
+                            getattr(
+                                stock,
+                                "minute_bars",
+                                [],
+                            )
+                        ),
+                        intraday_bars.get(
+                            symbol,
+                            [],
+                        ),
+                    )
+
+                if combined_bars_by_symbol:
+                    self.write_new_minute_bars_history(
+                        date_str=date_str,
+                        bars_by_symbol=(
+                            combined_bars_by_symbol
+                        ),
+                        source="LIVE_RECONCILED_FULL",
+                        data_feed=data_feed,
+                    )
+
+                    print(
+                        "Final reconciled minute history "
+                        "written to new trading workbook."
+                    )
+
+            except Exception as error:
+                print(
+                    "WARNING: Final new trading workbook "
+                    "minute history write failed."
+                )
+                print(
+                    f"Minute history error: {error}"
+                )
+
+        quick_flip_invest = [
+            symbol
+            for symbol, result
+            in self.quick_flip_results.items()
+            if (
+                result is not None
+                and result.signal is not None
+                and result.signal.signal
+                == "INVEST"
+            )
+        ]
+
+        print()
+        print(
+            "Quick Flip monitoring completed."
+        )
+
+        print(
+            "Quick Flip INVEST signals:",
+            (
+                ", ".join(
+                    quick_flip_invest
+                )
+                if quick_flip_invest
+                else "None"
+            ),
+        )
+
+        print(
+            "No Quick Flip stop-loss orders "
+            "were created."
+        )
+
+        print(
+            "No broker orders were submitted."
+        )
 
 
     def run_live_recovery(
@@ -3882,6 +5103,333 @@ class TradingBot:
                     f"{symbol}: manipulation strategy "
                     f"evaluation failed: {error}"
                 )
+
+    @staticmethod
+    def _quick_flip_candle_from_bar(
+            bar: dict,
+    ) -> QuickFlipCandle:
+        """
+        Convert one Alpaca OHLC bar into the immutable candle
+        representation used by Quick Flip.
+
+        This conversion performs no strategy evaluation.
+        """
+        timestamp_text = str(
+            bar["t"]
+        ).strip()
+
+        if timestamp_text.endswith("Z"):
+            timestamp_text = (
+                timestamp_text[:-1] + "+00:00"
+            )
+
+        return QuickFlipCandle(
+            timestamp=datetime.fromisoformat(
+                timestamp_text
+            ),
+            open=float(bar["o"]),
+            high=float(bar["h"]),
+            low=float(bar["l"]),
+            close=float(bar["c"]),
+            volume=float(
+                bar.get("v", 0) or 0
+            ),
+        )
+
+    def _calculate_quick_flip_strategy(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> dict:
+        """
+        Evaluate Quick Flip independently of Manipulation.
+
+        Quick Flip:
+        - uses the completed 09:30-09:45 opening candle;
+        - compares that candle with Wilder ATR14;
+        - watches completed 5-minute candles from 09:45;
+        - stops accepting new setups at 11:00 ET;
+        - stores results separately from Stock.signal;
+        - never creates a stop-loss value;
+        - never submits an order.
+        """
+        eastern = ZoneInfo("America/New_York")
+        utc = ZoneInfo("UTC")
+
+        trading_date = datetime.strptime(
+            date_str,
+            "%Y-%m-%d",
+        ).date()
+
+        monitor_start = datetime.combine(
+            trading_date,
+            time(hour=9, minute=45),
+            tzinfo=eastern,
+        )
+
+        monitor_cutoff = datetime.combine(
+            trading_date,
+            time(hour=11, minute=0),
+            tzinfo=eastern,
+        )
+
+        if evaluation_end is None:
+            normalized_end = monitor_cutoff
+        else:
+            normalized_end = evaluation_end
+
+            if normalized_end.tzinfo is None:
+                normalized_end = (
+                    normalized_end.replace(
+                        tzinfo=eastern,
+                    )
+                )
+            else:
+                normalized_end = (
+                    normalized_end.astimezone(
+                        eastern
+                    )
+                )
+
+            if normalized_end > monitor_cutoff:
+                normalized_end = monitor_cutoff
+
+        self.quick_flip_results = {}
+        self.quick_flip_status = {}
+
+        opening_bars = (
+            self.alpaca.get_opening_15min_bars(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        atrs = (
+            self.alpaca.get_previous_day_ranges_all(
+                symbols_csv=self.symbols_csv,
+                date_str=date_str,
+                feed=data_feed,
+            )
+        )
+
+        bars_by_symbol = {
+            symbol: []
+            for symbol in self.stocks
+        }
+
+        if normalized_end > monitor_start:
+            start_utc = (
+                monitor_start
+                .astimezone(utc)
+            )
+
+            end_utc = (
+                normalized_end
+                .astimezone(utc)
+            )
+
+            bars_by_symbol = (
+                self.alpaca
+                .get_historical_1min_bars(
+                    symbols_csv=self.symbols_csv,
+                    start_iso=start_utc.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    end_iso=end_utc.strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    feed=data_feed,
+                )
+            )
+
+        cutoff_reached = (
+            normalized_end >= monitor_cutoff
+        )
+
+        for symbol in self.stocks:
+            opening_bar = opening_bars.get(
+                symbol
+            )
+
+            atr_14 = atrs.get(
+                symbol
+            )
+
+            if opening_bar is None:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "MISSING_OPENING_BAR"
+
+                print(
+                    f"{symbol}: Quick Flip skipped "
+                    "because the opening 15-minute "
+                    "bar was unavailable."
+                )
+
+                continue
+
+            if atr_14 is None:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "MISSING_ATR14"
+
+                print(
+                    f"{symbol}: Quick Flip skipped "
+                    "because ATR14 was unavailable."
+                )
+
+                continue
+
+            try:
+                opening_candle = (
+                    self._quick_flip_candle_from_bar(
+                        opening_bar
+                    )
+                )
+
+                result = (
+                    self.quick_flip_monitor
+                    .evaluate_minute_bars(
+                        symbol=symbol,
+                        opening_bar=opening_candle,
+                        atr_14=float(atr_14),
+                        minute_bars=(
+                            bars_by_symbol.get(
+                                symbol,
+                                [],
+                            )
+                        ),
+                        evaluation_end=(
+                            normalized_end
+                            .astimezone(utc)
+                        ),
+                        cutoff_reached=(
+                            cutoff_reached
+                        ),
+                    )
+                )
+
+                self.quick_flip_results[
+                    symbol
+                ] = result
+
+                self.quick_flip_status[
+                    symbol
+                ] = result.status
+
+            except Exception as error:
+                self.quick_flip_results[
+                    symbol
+                ] = None
+
+                self.quick_flip_status[
+                    symbol
+                ] = "EVALUATION_FAILED"
+
+                print(
+                    f"{symbol}: Quick Flip "
+                    f"evaluation failed: {error}"
+                )
+
+        return dict(
+            self.quick_flip_results
+        )
+
+    def calculate_parallel_strategies(
+            self,
+            date_str: str,
+            evaluation_end: datetime | None = None,
+            data_feed: str = MARKET_DATA_FEED,
+    ) -> dict:
+        """
+        Evaluate Manipulation and Quick Flip independently.
+
+        Manipulation continues to own the legacy Stock strategy
+        fields.
+
+        Quick Flip writes only to self.quick_flip_results and
+        self.quick_flip_status.
+
+        Therefore one strategy cannot overwrite the other's
+        signal state.
+        """
+        print()
+        print(
+            "Running Manipulation + Quick Flip "
+            "in parallel..."
+        )
+
+        self._calculate_manipulation_strategy(
+            date_str=date_str,
+        )
+
+        quick_flip_results = (
+            self._calculate_quick_flip_strategy(
+                date_str=date_str,
+                evaluation_end=evaluation_end,
+                data_feed=data_feed,
+            )
+        )
+
+        manipulation_invest = [
+            symbol
+            for symbol, stock
+            in self.stocks.items()
+            if stock.signal == "INVEST"
+        ]
+
+        quick_flip_invest = [
+            symbol
+            for symbol, result
+            in quick_flip_results.items()
+            if (
+                result is not None
+                and result.signal is not None
+                and result.signal.signal
+                == "INVEST"
+            )
+        ]
+
+        print(
+            "Manipulation INVEST:",
+            (
+                ", ".join(
+                    manipulation_invest
+                )
+                if manipulation_invest
+                else "None"
+            ),
+        )
+
+        print(
+            "Quick Flip INVEST:",
+            (
+                ", ".join(
+                    quick_flip_invest
+                )
+                if quick_flip_invest
+                else "None"
+            ),
+        )
+
+        return {
+            "manipulation": (
+                manipulation_invest
+            ),
+            "quick_flip": (
+                quick_flip_invest
+            ),
+        }
 
     def _set_fibonacci_performance_metric(
             self,
